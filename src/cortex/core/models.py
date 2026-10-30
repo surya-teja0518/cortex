@@ -32,8 +32,3 @@ class ScoreResult(BaseModel):
     reasons: list[str] = Field(max_length=6)
     red_flags: list[str] = Field(default_factory=list)
 
-
-class TailoredResume(BaseModel):
-    summary: str
-    bullets: list[str]
-    skills_emphasized: list[str]
