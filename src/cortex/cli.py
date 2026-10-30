@@ -1,4 +1,4 @@
-"""cortex import <csv...> | stats | compare"""
+"""cortex import <csv...> | stats | compare | eval"""
 import argparse
 import os
 import statistics
@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 
 from cortex.core.audit import AuditLog
 from cortex.core.config import load_config
+from cortex.core.ratelimit import RateLimiter
 from cortex.core.secrets import get_secret
 from cortex.db.schema import JobRow, get_session
 from cortex.sources.synapse_import import import_files
@@ -52,6 +53,20 @@ def cmd_compare(a, uid):
         print(f"   {x.company} | {x.title} | synapse={x.synapse_score} cortex={x.score}")
 
 
+def cmd_eval(a, uid):
+    """Deterministic vs LLM scorer against real apply decisions. LLM responses are cached by job."""
+    from cortex.agents.scorer import GeminiProvider, GroqProvider, LLMScorer
+    from cortex.eval import format_report, run_eval
+
+    cfg = load_config(a.config)
+    scorer = None
+    if a.provider != "none":
+        provider = {"gemini": GeminiProvider, "groq": GroqProvider}[a.provider]()
+        scorer = LLMScorer(provider, RateLimiter(cfg["rate_limits"]["llm"]), AuditLog(),
+                           cfg["scoring"]["bands"])
+    print(format_report(run_eval(_session(), uid, scorer)))
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="cortex")
     p.add_argument("--config", default=None)
@@ -61,6 +76,10 @@ def main(argv=None):
     i.set_defaults(fn=cmd_import)
     sub.add_parser("stats").set_defaults(fn=cmd_stats)
     sub.add_parser("compare").set_defaults(fn=cmd_compare)
+    e = sub.add_parser("eval", help="deterministic vs LLM scorer against applied/interview/offer labels")
+    e.add_argument("--provider", choices=["none", "gemini", "groq"], default="none",
+                   help="LLM provider (gemini/groq are stubs until wired; their jobs fall back)")
+    e.set_defaults(fn=cmd_eval)
     a = p.parse_args(argv)
     a.fn(a, os.getenv("CORTEX_USER_ID", "surya"))
 

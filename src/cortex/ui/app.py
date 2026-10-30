@@ -5,9 +5,10 @@ import os
 
 import streamlit as st
 
+from cortex.core.audit import AuditLog
 from cortex.core.secrets import get_secret
 from cortex.db.schema import get_session
-from cortex.review import review_queue
+from cortex.review import record_skip, review_queue
 
 st.set_page_config(page_title="CORTEX", layout="wide")
 
@@ -34,6 +35,14 @@ with st.sidebar:
 rows = review_queue(session, uid, tracks=tracks, city=city, min_synapse=min_syn,
                     include_gated=show_gated, include_dups=show_dups, statuses=tuple(statuses))
 st.caption(f"{len(rows)} jobs. Applications are never auto-submitted: open the link and apply yourself.")
-st.dataframe(rows, use_container_width=True, hide_index=True,
-             column_config={"url": st.column_config.LinkColumn("job link"),
-                            "flagged": st.column_config.CheckboxColumn("injection flag")})
+event = st.dataframe(rows, use_container_width=True, hide_index=True,
+                     on_select="rerun", selection_mode="multi-row",
+                     column_config={"url": st.column_config.LinkColumn("job link"),
+                                    "flagged": st.column_config.CheckboxColumn("injection flag")})
+picked = [rows[i]["id"] for i in event.selection.rows]
+if st.button(f"Skip selected ({len(picked)})", disabled=not picked,
+             help="Record 'not applying'. Skips are the negative labels for `cortex eval`."):
+    audit = AuditLog()
+    for jid in picked:
+        record_skip(session, uid, jid, audit)
+    st.rerun()  # skipped jobs drop out of the queue
