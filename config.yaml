@@ -1,10 +1,19 @@
 # Deterministic gates (run BEFORE any LLM call; ported from SYNAPSE)
 gates:
   title_blocklist: [lead, principal, staff, architect, manager, director, "head of", vp, svp, chief]
-  max_min_yoe: 5
+  max_min_yoe: 5          # reject if stated min YOE > this; unstated -> VERIFY, never auto-rejected
+
+# Deterministic scoring (ported from SYNAPSE standing rules). Applicant count is optional input.
 scoring:
   base: {data: 64, database: 61, ai: 62}
+  stack: {azure: 7, snowflake_databricks: 4, dba: 5, ai_ml: 3, aws_gcp_native: -6, verify: -2}
+  hyderabad: 3
+  applicants: {low_below: 30, low_bonus: 2, high_above: 200, high_penalty: -2}
+  exp_stated: 2
+  exp_unstated: -3
+  min_yoe: {le3: 2, eq4: 1, eq5: -1}
   bands: {P0: 85, P1: 78, P2: 70}
+
 rate_limits:   # requests per minute per provider
   apify: 10
   llm: 12

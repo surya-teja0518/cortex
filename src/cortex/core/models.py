@@ -1,11 +1,14 @@
 """Pydantic models. Every LLM output must validate against one of these."""
-from typing import Literal, Optional
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 Track = Literal["data", "database", "ai"]
 Band = Literal["P0", "P1", "P2", "P3"]
-Status = Literal["new", "gated_out", "scored", "tailored", "pending_approval",
-                 "approved", "rejected", "applied", "interview", "offer", "closed"]
+# Normalized lifecycle statuses (tracker import maps raw sheet values onto these)
+Status = Literal["to_apply", "applied", "interview", "offer", "rejected",
+                 "not_accepting", "exp_mismatch", "closed",
+                 "new", "gated_out", "scored", "tailored", "pending_approval", "approved"]
 
 
 class Job(BaseModel):
@@ -16,10 +19,10 @@ class Job(BaseModel):
     location: str = ""
     url: str
     description: str = ""
-    min_yoe: Optional[int] = None
-    max_yoe: Optional[int] = None
-    applicants: Optional[int] = None
-    posted_at: Optional[str] = None
+    min_yoe: int | None = None
+    max_yoe: int | None = None
+    applicants: int | None = None
+    posted_at: str | None = None
 
 
 class ScoreResult(BaseModel):

@@ -1,6 +1,6 @@
 """Simple per-key token-bucket limiter. Wrap every external call."""
-import time
 import threading
+import time
 
 
 class RateLimiter:

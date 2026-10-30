@@ -1,11 +1,21 @@
-"""Deterministic gates. Run before any LLM call: cheap, auditable, zero cost."""
+"""Deterministic gates. Run before any LLM call: cheap, auditable, zero cost.
+
+Title matching uses WORD BOUNDARIES: 'lead' blocks 'Lead Data Engineer' but not
+'Leadership Analyst'; 'vp' blocks 'VP Data' but never matches inside other words.
+"""
+import re
+
 from .models import Job
+
+
+def _pattern(word: str) -> re.Pattern:
+    return re.compile(rf"(?<![a-z0-9]){re.escape(word.lower())}(?![a-z0-9])")
 
 
 def title_blocked(job: Job, blocklist: list[str]) -> str | None:
     t = job.title.lower()
     for w in blocklist:
-        if w in t:
+        if _pattern(w).search(t):
             return f"title contains '{w}'"
     return None
 

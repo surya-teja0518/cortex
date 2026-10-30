@@ -7,6 +7,10 @@ dependencies = ["pydantic>=2.7", "sqlalchemy>=2.0", "python-dotenv>=1.0", "pyyam
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6"]
+ui = ["streamlit>=1.40"]
+
+[project.scripts]
+cortex = "cortex.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

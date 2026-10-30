@@ -1,8 +1,10 @@
-import tempfile, os
+import os
+import tempfile
+
+from cortex.core.audit import AuditLog
 from cortex.core.gates import run_gates
 from cortex.core.models import Job
 from cortex.core.sanitize import sanitize_jd
-from cortex.core.audit import AuditLog
 
 CFG = {"gates": {"title_blocklist": ["lead", "principal", "architect"], "max_min_yoe": 5}}
 

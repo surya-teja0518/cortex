@@ -22,6 +22,13 @@ Project context lives in `AGENTS.md` (single source of truth). `CLAUDE.md`, `GEM
 
 ## Run
 ```
-pip install -e ".[dev]" && pytest
+pip install -e ".[dev,ui]" && pytest
+cp .env.example .env
+# export Google Sheets -> CSV (File > Download > CSV), put files in data/import/ (gitignored)
+cortex import data/import/<master>.csv data/import/<batch>.csv   # master first, then batches oldest -> newest
+cortex stats
+cortex compare        # CORTEX deterministic score vs SYNAPSE Match
+streamlit run src/cortex/ui/app.py --server.address 127.0.0.1
 ```
-Status: v0.1 scaffold (core, gates, schema). Next: SYNAPSE importer, Apify adapter, scorer.
+Status: v0.2. Implemented: tracker import, gates, deterministic scorer, fuzzy dedupe, review UI, audit log.
+Next: Apify adapter, LLM scorer + eval harness.

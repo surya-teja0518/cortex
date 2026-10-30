@@ -38,15 +38,19 @@ Sequential LangGraph state machine, not a parallel hub:
 - Dashboard binds to localhost; add auth before exposing anywhere.
 - Never invent resume content. Truth Guard is the backstop, not the excuse.
 
-## Current state (as of 2026-10-30)
-Built and tested (5 tests passing):
-- `src/cortex/core/`: `gates.py`, `sanitize.py`, `audit.py` (hash chain + verify), `ratelimit.py`, `secrets.py`, `models.py` (Job, ScoreResult, TailoredResume)
-- `src/cortex/db/schema.py`: `jobs` and `approvals` tables (SQLAlchemy 2.0, `user_id` everywhere)
-- `config.yaml`, `.env.example`, `pyproject.toml`, `tests/test_core.py`, README
-NOT built yet: importer, Apify adapter, dedupe, scorer, tailor, truth guard, approval gate, packet, tracker, dashboard, scheduler, Telegram, eval harness.
+## Current state (as of 2026-10-31)
+Step 1 (MVP) built; 32 tests passing. Pushed to main.
+- `core/`: `gates.py` (word-boundary title blocklist + YOE cap), `scoring.py` (deterministic SYNAPSE rules, config-driven), `dedupe.py` (fuzzy; same company + same city + same level tokens), `parsing.py`, `sanitize.py`, `audit.py` (hash chain), `ratelimit.py`, `secrets.py`, `config.py`, `models.py`
+- `sources/synapse_import.py`: imports SYNAPSE tracker CSV exports (master + dated batches); idempotent upsert; never downgrades status (Applied stays Applied); sanitizes and flags injection; keeps SYNAPSE's own Match/Priority in `synapse_score`/`synapse_priority` for evaluation
+- `db/schema.py`: `jobs` (full 23-column tracker fields + cortex score/band/gate/dup/flags) and `approvals`; `user_id` everywhere
+- `cli.py`: `cortex import <csv...>`, `cortex stats`, `cortex compare` (CORTEX score vs SYNAPSE Match: MAE, bias, Pearson r, band agreement)
+- `review.py` + `ui/app.py`: Streamlit review queue (local-only; optional `CORTEX_UI_PASSWORD`)
+- Tracker headers verified from the real sheets (23 cols A-W). Master `Exp Req` is free text ("~3-6 yrs"); batches use bare numbers or "Verify". Header is "Comp (est/disclosed)" in master, "Comp" in batches. Both handled.
+- KNOWN FINDING: documented SYNAPSE scoring rules reproduce SYNAPSE's stored Match only loosely (on the fixture CORTEX scores ~6 points lower, band agreement 33%). SYNAPSE's real Match evidently includes adjustments not in the written rules (likely fit judgment). This is exactly what the LLM scorer + eval harness (step 2) must close. Do NOT tune weights to hit Match blindly; evaluate against Surya's real apply/skip decisions.
+NOT built yet: Apify adapter, LLM scorer, eval harness (beyond `compare`), tailor, truth guard, approval gate, packet, tracker agent, scheduler, Telegram.
 
 ## Build order (each step must be usable on its own)
-1. **MVP:** SYNAPSE import (master + Batch010–015) → dedupe → gates → deterministic score → Streamlit review list.
+1. **MVP (DONE, v0.2):** SYNAPSE import → dedupe → gates → deterministic score → Streamlit review list. Next for this step: import real Batch016 export, then the older batches (master first).
 2. LLM scorer + **eval harness** (compare LLM score vs deterministic score vs Surya's apply/skip decisions; precision/recall). This earns the resume line.
 3. Tailor + Truth Guard + approval gate (LangGraph interrupt, SQLite checkpointer).
 4. Packet + Telegram notifier + scheduler.

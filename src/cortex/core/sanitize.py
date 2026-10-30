@@ -16,7 +16,7 @@ MAX_LEN = 20_000
 def sanitize_jd(text: str) -> tuple[str, list[str]]:
     """Return (clean_text, flags). Flagged jobs go to manual review, never auto-processed."""
     text = _CTRL.sub("", text or "")[:MAX_LEN]
-    flags = [p for p in INJECTION_PATTERNS if re.search(p, text, re.I)]
+    flags = [p for p in INJECTION_PATTERNS if re.search(p, text, re.IGNORECASE)]
     return text, flags
 
 
