@@ -17,6 +17,9 @@ Rate limiter, audit log (hash-chained) and secrets wrap every external call.
 - No auto-submit, no LinkedIn automation (account safety + ToS)
 - Secrets via env only; tamper-evident audit log; `user_id` on every table
 
+## For AI coding agents
+Project context lives in `AGENTS.md` (single source of truth). `CLAUDE.md`, `GEMINI.md` and `.cursor/rules` just point to it.
+
 ## Run
 ```
 pip install -e ".[dev]" && pytest
