@@ -10,3 +10,4 @@ __pycache__/
 *.egg-info/
 resumes/
 packets/
+master_resume.yaml
