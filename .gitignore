@@ -1,0 +1,12 @@
+.env
+*.db
+*.sqlite
+data/*
+!data/.gitkeep
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+resumes/
+packets/

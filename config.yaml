@@ -1,0 +1,10 @@
+# Deterministic gates (run BEFORE any LLM call; ported from SYNAPSE)
+gates:
+  title_blocklist: [lead, principal, staff, architect, manager, director, "head of", vp, svp, chief]
+  max_min_yoe: 5
+scoring:
+  base: {data: 64, database: 61, ai: 62}
+  bands: {P0: 85, P1: 78, P2: 70}
+rate_limits:   # requests per minute per provider
+  apify: 10
+  llm: 12
