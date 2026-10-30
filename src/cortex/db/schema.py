@@ -76,6 +76,30 @@ class ApprovalRow(Base):
     decided_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
+class SkipRow(Base):
+    """Explicit "not applying" decisions from the review UI: the negative labels for eval."""
+    __tablename__ = "skips"
+    __table_args__ = (UniqueConstraint("user_id", "job_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    job_id: Mapped[int] = mapped_column(Integer, index=True)
+    decided_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class LLMScoreCacheRow(Base):
+    """Validated LLM scores, keyed by job + provider + prompt hash, so eval reruns make no calls.
+    Stores only the parsed result (no prompt, no job text). Failures are never cached."""
+    __tablename__ = "llm_score_cache"
+    __table_args__ = (UniqueConstraint("user_id", "job_id", "provider", "prompt_sha256"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    job_id: Mapped[int] = mapped_column(Integer, index=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    prompt_sha256: Mapped[str] = mapped_column(String(64))
+    result_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
 def get_session(url: str = "sqlite:///data/cortex.db"):
     engine = create_engine(url)
     Base.metadata.create_all(engine)

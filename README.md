@@ -28,7 +28,10 @@ cp .env.example .env
 cortex import data/import/<master>.csv data/import/<batch>.csv   # master first, then batches oldest -> newest
 cortex stats
 cortex compare        # CORTEX deterministic score vs SYNAPSE Match
+cortex eval           # recall@P0-P1 + mean percentile rank vs real applied/interview/offer labels
 streamlit run src/cortex/ui/app.py --server.address 127.0.0.1
 ```
-Status: v0.2. Implemented: tracker import, gates, deterministic scorer, fuzzy dedupe, review UI, audit log.
-Next: Apify adapter, LLM scorer + eval harness.
+Status: v0.3. Implemented: tracker import, gates, deterministic scorer, fuzzy dedupe, review UI
+(with Skip decisions), audit log, LLM scorer skeleton (provider interface, Pydantic-validated output,
+retry + deterministic fallback; tested with a fake provider), offline eval with cached LLM scores.
+Not yet: live Gemini/Groq calls (stubs), precision metrics (need skip decisions as negatives), Apify adapter.

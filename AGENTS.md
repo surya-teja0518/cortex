@@ -47,7 +47,11 @@ Step 1 (MVP) built; 32 tests passing. Pushed to main.
 - `review.py` + `ui/app.py`: Streamlit review queue (local-only; optional `CORTEX_UI_PASSWORD`)
 - Tracker headers verified from the real sheets (23 cols A-W). Master `Exp Req` is free text ("~3-6 yrs"); batches use bare numbers or "Verify". Header is "Comp (est/disclosed)" in master, "Comp" in batches. Both handled.
 - KNOWN FINDING: documented SYNAPSE scoring rules reproduce SYNAPSE's stored Match only loosely (on the fixture CORTEX scores ~6 points lower, band agreement 33%). SYNAPSE's real Match evidently includes adjustments not in the written rules (likely fit judgment). This is exactly what the LLM scorer + eval harness (step 2) must close. Do NOT tune weights to hit Match blindly; evaluate against Surya's real apply/skip decisions.
-NOT built yet: Apify adapter, LLM scorer, eval harness (beyond `compare`), tailor, truth guard, approval gate, packet, tracker agent, scheduler, Telegram.
+Step 2 in progress (branch feat/llm-scorer, 84 tests):
+- `agents/scorer.py`: `ScoringInput` (structured tracker fields; description optional), provider protocol + `FakeProvider`; Gemini/Groq are key-reading stubs (no live calls yet). All fields sanitized and inside one `<untrusted_job_text>` block; injection in ANY field -> no LLM call. Output = `LLMScore` (int or integral-float score 0-100, no bools, extra fields forbidden). Bad output / provider error -> one retry -> deterministic score + `llm_unscored`. Rate-limited; audit logs outcome + error type only.
+- `eval.py` + `cortex eval`: positives = applied/interview/offer; recall@P0-P1 and mean percentile rank, deterministic vs LLM; gated positives reported separately; LLM results cached in `llm_score_cache` by (user, job, provider, prompt sha256). Precision deliberately not reported until negatives exist.
+- `skips` table + `review.record_skip`; UI "Skip selected" button. Skips are the negative labels.
+NOT built yet: live Gemini/Groq calls, precision metrics, Apify adapter, tailor, truth guard, approval gate, packet, tracker agent, scheduler, Telegram.
 
 ## Build order (each step must be usable on its own)
 1. **MVP (DONE, v0.2):** SYNAPSE import → dedupe → gates → deterministic score → Streamlit review list. Next for this step: import real Batch016 export, then the older batches (master first).
