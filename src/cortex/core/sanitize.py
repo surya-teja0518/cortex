@@ -20,6 +20,10 @@ def sanitize_jd(text: str) -> tuple[str, list[str]]:
     return text, flags
 
 
+_DELIM = re.compile(r"<\s*/?\s*untrusted_job_text\s*>", re.IGNORECASE)
+
+
 def wrap_untrusted(text: str) -> str:
-    safe = text.replace("</untrusted_job_text>", "")
+    # Strip any open/close delimiter variant so job text cannot fake a boundary.
+    safe = _DELIM.sub("", text)
     return f"<untrusted_job_text>\n{safe}\n</untrusted_job_text>"
