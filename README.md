@@ -2,6 +2,9 @@
 
 Multi-agent job-search system. Human-in-the-loop by design: it prepares, **you** submit.
 
+## Architecture
+![CORTEX architecture v1](docs/architecture-v1.png)
+
 ## Pipeline
 `Sources → Sanitizer → Dedupe → Gates → Scorer → Tailor → Truth Guard → [HUMAN APPROVAL] → Packet → Tracker`
 
