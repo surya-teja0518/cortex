@@ -72,7 +72,7 @@ def _term_regex(terms: set[str]) -> re.Pattern | None:
     if not terms:
         return None
     alts = sorted((re.escape(t) for t in terms), key=len, reverse=True)  # longest first
-    return re.compile(r"(?<![\w+#.])(?:" + "|".join(alts) + r")(?![\w+#])", re.IGNORECASE)
+    return re.compile(r"(?<![\w+#.])(?:" + "|".join(alts) + r")(?:'?s)?(?![\w+#])", re.IGNORECASE)
 
 
 class TruthGuard:
@@ -83,6 +83,7 @@ class TruthGuard:
             for n in (s.name, *s.aliases):
                 self._skill_canon[norm(n)] = norm(s.name)
         vocab = {*TECH_TERMS, *(extra_terms or []), *(n for s in master.skills for n in (s.name, *s.aliases))}
+        self._vocab = {norm(t) for t in vocab}
         self._vocab_rx = _term_regex(vocab)
         self._all_tokens = metric_tokens(" ".join(self._texts_all()))
 
@@ -117,7 +118,16 @@ class TruthGuard:
 
     # --- free-text checks ---
     def _terms_in(self, text: str) -> list[str]:
-        return [m.group(0) for m in self._vocab_rx.finditer(text)] if self._vocab_rx else []
+        if not self._vocab_rx:
+            return []
+        out = []
+        for m in self._vocab_rx.finditer(text):
+            t = m.group(0)
+            # "LLMs" -> "LLM", unless the word itself is a known term ("Kubernetes", "REST APIs", "pandas")
+            if norm(t) not in self._vocab:
+                t = re.sub(r"'?s$", "", t, flags=re.IGNORECASE)
+            out.append(t)
+        return out
 
     def _check_text(self, text: str, where: str, skills: set[str], tokens: set[str]) -> list[Violation]:
         v = []

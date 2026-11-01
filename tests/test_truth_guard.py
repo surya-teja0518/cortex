@@ -127,6 +127,13 @@ def test_skill_detected_next_to_punctuation(bullet):
     assert kinds(check(good(roles=[good()["roles"][0], r]))) == [("skill", "Kafka")]
 
 
+def test_plural_terms_detected():
+    g = TruthGuard(MASTER)
+    assert g._terms_in("Exploring LLMs and Kafka's ecosystem") == ["LLM", "Kafka"]
+    vs = check(good(summary="Data engineer with 4+ years building LLMs on Azure."))
+    assert kinds(vs) == [("skill", "LLM")]
+
+
 def test_terms_not_false_flagged():
     g = TruthGuard(MASTER)
     assert g._terms_in("Go-live in two weeks; PL/SQL tuning") == ["PL/SQL"]
