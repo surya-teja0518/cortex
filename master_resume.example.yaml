@@ -1,0 +1,57 @@
+# EXAMPLE ONLY: a fictional person, to document the schema (src/cortex/core/resume.py).
+# Copy to master_resume.yaml (gitignored) and fill from your real resume files.
+# Rules: copy metrics EXACTLY from the resumes; never round, recompute or embellish.
+# No contact details (email, phone, profile URLs): the loader rejects them.
+version: 1
+summary: Data engineer with 4+ years building batch and streaming pipelines on Azure and Oracle.
+
+skills:
+  - {name: Python}
+  - {name: SQL}
+  - {name: PySpark}
+  - {name: Azure Databricks, aliases: [Databricks]}
+  - {name: Azure Data Factory, aliases: [ADF]}
+  - {name: Azure}
+  - {name: Kafka, aliases: [Apache Kafka]}
+  - {name: Oracle, aliases: [Oracle Database]}
+  - {name: Airflow, aliases: [Apache Airflow]}
+  - {name: Snowflake}
+  - {name: Flask}
+  - {name: Docker}
+
+roles:
+  - employer: Example Systems
+    client: Example Bank
+    title: Data Engineer
+    start: "2024-07"
+    end: present
+    bullets:
+      - Administered 6 production Oracle databases feeding Kafka-based streaming flows.
+      - Built a Flask + Docker KPI dashboard for database health.
+    metrics: ["6 production Oracle databases"]
+    skills: [Oracle, Kafka, Python, Flask, Docker, SQL]
+
+  - employer: Sample Consulting
+    client: Sample Health
+    title: Associate Data Engineer
+    start: "2021-06"
+    end: "2024-06"
+    bullets:
+      - Built PySpark pipelines on Azure Databricks orchestrated by ADF.
+      - Migrated 120 tables to Snowflake, cutting nightly load time by 35%.
+    metrics: ["120 tables", "35% faster nightly load"]
+    skills: [PySpark, Azure Databricks, Azure Data Factory, Azure, Snowflake, Airflow, SQL, Python]
+
+projects:
+  - name: DB KPI Automation
+    aliases: [KPI Automation Platform]
+    employer: Example Systems
+    description: Automated collection of 40 database KPIs into a single dashboard.
+    metrics: ["40 database KPIs"]
+    skills: [Python, Flask, Docker, Oracle]
+
+certifications:
+  - {name: "Microsoft Certified: Azure Data Engineer Associate", code: DP-203, issuer: Microsoft}
+
+education:
+  - {institution: Example Institute of Technology, degree: B.Tech Computer Science, start: "2017-08", end: "2021-05"}

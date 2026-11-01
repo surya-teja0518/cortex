@@ -33,5 +33,8 @@ streamlit run src/cortex/ui/app.py --server.address 127.0.0.1
 ```
 Status: v0.3. Implemented: tracker import, gates, deterministic scorer, fuzzy dedupe, review UI
 (with Skip decisions), audit log, LLM scorer skeleton (provider interface, Pydantic-validated output,
-retry + deterministic fallback; tested with a fake provider), offline eval with cached LLM scores.
-Not yet: live Gemini/Groq calls (stubs), precision metrics (need skip decisions as negatives), Apify adapter.
+retry + deterministic fallback; tested with a fake provider), offline eval with cached LLM scores,
+master resume schema (`master_resume.example.yaml`; real file gitignored, contact details rejected) and a
+deterministic Truth Guard (skills, employers, titles, dates, projects, metrics, certs checked per employer
+scope; max 2 retries to the tailor, then reject). Truth Guard does not semantically verify paraphrased prose.
+Not yet: the tailor itself, live Gemini/Groq calls (stubs), precision metrics (need skip decisions as negatives), Apify adapter.
