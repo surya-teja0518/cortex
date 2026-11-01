@@ -29,6 +29,7 @@ cortex import data/import/<master>.csv data/import/<batch>.csv   # master first,
 cortex stats
 cortex compare        # CORTEX deterministic score vs SYNAPSE Match
 cortex eval           # recall@P0-P1 + mean percentile rank vs real applied/interview/offer labels
+cortex tailor <job_id> # tailor -> Truth Guard -> pauses at the approval gate (approve in the dashboard)
 streamlit run src/cortex/ui/app.py --server.address 127.0.0.1
 ```
 Status: v0.3. Implemented: tracker import, gates, deterministic scorer, fuzzy dedupe, review UI
@@ -37,4 +38,6 @@ retry + deterministic fallback; tested with a fake provider), offline eval with 
 master resume schema (`master_resume.example.yaml`; real file gitignored, contact details rejected) and a
 deterministic Truth Guard (skills, employers, titles, dates, projects, metrics, certs checked per employer
 scope; max 2 retries to the tailor, then reject). Truth Guard does not semantically verify paraphrased prose.
-Not yet: the tailor itself, live Gemini/Groq calls (stubs), precision metrics (need skip decisions as negatives), Apify adapter.
+Per-job LangGraph (tailor -> Truth Guard -> human approval `interrupt` -> record) checkpointed to SQLite:
+a crash resumes at the gate without re-running the LLM; approval only from the Streamlit dashboard.
+Not yet: live Gemini/Groq calls (stubs, so the tailor has no working LLM yet), resume PDF + cover note, precision metrics (need skip decisions as negatives), Apify adapter.

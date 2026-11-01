@@ -4,7 +4,7 @@ import json
 from sqlalchemy import select
 
 from cortex.core.audit import AuditLog
-from cortex.db.schema import JobRow, SkipRow
+from cortex.db.schema import JobRow, SkipRow, TailoredResumeRow
 
 
 def review_queue(session, user_id: str, *, tracks=None, city: str = "", min_synapse: int = 0,
@@ -51,3 +51,14 @@ def record_skip(session, user_id: str, job_id: int, audit: AuditLog | None = Non
 
 def skipped_job_ids(session, user_id: str) -> set[int]:
     return set(session.scalars(select(SkipRow.job_id).where(SkipRow.user_id == user_id)))
+
+
+def pending_approvals(session, user_id: str) -> list[dict]:
+    """Tailored resumes that passed Truth Guard and wait for a human decision."""
+    q = (select(TailoredResumeRow, JobRow)
+         .join(JobRow, (JobRow.id == TailoredResumeRow.job_id) & (JobRow.user_id == TailoredResumeRow.user_id))
+         .where(TailoredResumeRow.user_id == user_id, TailoredResumeRow.status == "pending_approval")
+         .order_by(TailoredResumeRow.created_at))
+    return [dict(job_id=j.id, company=j.company, role=j.title, url=j.url, attempts=t.attempts,
+                 created_at=t.created_at, resume=json.loads(t.resume_json or "null"))
+            for t, j in session.execute(q)]
