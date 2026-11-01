@@ -46,6 +46,7 @@ class Role(_Strict):
     employer: Text
     client: Text | None = None
     title: Text
+    alt_titles: list[Text] = Field(default_factory=list)  # other titles used for this SAME role on real resumes
     start: YearMonth
     end: EndDate
     bullets: list[Text] = Field(default_factory=list)

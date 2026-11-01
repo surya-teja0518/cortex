@@ -5,7 +5,7 @@ Every claim must trace back to the master file:
                   skills of THAT role/project (no moving Kafka from one employer to another)
   employer     -> must be a master employer (and client, if given)
   dates        -> start/end must equal a master role for that employer exactly
-  title        -> must equal that master role's title
+  title        -> must equal that master role's title (or one of its alt_titles)
   project      -> must be a master project (name or alias)
   metric       -> every number in free text must appear in the master text for the same scope
   certification-> must be a master certification (name or code)
@@ -40,7 +40,7 @@ TECH_TERMS = [
 
 _NUM = re.compile(
     r"(?<![A-Za-z]-)(?<![\w.])[$₹€£]?\d+(?:[.,]\d+)*"
-    r"(?:\s?(?:%|x|\+|k|m|b|mn|bn|cr|million|billion|thousand|lakhs?|crores?|tb|gb|pb|hrs?|ms))?(?![\w%+])",
+    r"(?:\s?(?:%|x|k|m|b|mn|bn|cr|million|billion|thousand|lakhs?|crores?|tb|gb|pb|hrs?|ms))?\+?(?![\w%+])",
     re.IGNORECASE)
 
 Kind = Literal["skill", "employer", "client", "title", "date", "project", "metric", "certification",
@@ -152,8 +152,9 @@ class TruthGuard:
                 v.append(Violation(kind="date", claim=f"{tr.start}..{tr.end}", where=where,
                                    reason=f"master dates for this employer: {have}"))
                 continue
-            if norm(tr.title) != norm(match.title):
-                v.append(Violation(kind="title", claim=tr.title, where=where, reason=f"master title is '{match.title}'"))
+            if norm(tr.title) not in {norm(x) for x in (match.title, *match.alt_titles)}:
+                allowed = " / ".join(f"'{x}'" for x in (match.title, *match.alt_titles))
+                v.append(Violation(kind="title", claim=tr.title, where=where, reason=f"master title is {allowed}"))
             if tr.client and (match.client is None or norm(tr.client) != norm(match.client)):
                 v.append(Violation(kind="client", claim=tr.client, where=where,
                                    reason=f"master client is '{match.client}'"))

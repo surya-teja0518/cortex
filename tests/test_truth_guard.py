@@ -100,6 +100,9 @@ def test_metric_tokens():
         {"35%", "120", "3x", "$1.5m", "10+"}
     assert metric_tokens("DP-203 on S3 and EC2") == set()   # identifiers are not metrics
     assert metric_tokens("8 million rows") == {"8million"}
+    # unit followed by "+" must still be a claim (was silently dropped)
+    assert metric_tokens("2TB+ datasets, 2 TB+ and 5GB") == {"2tb+", "5gb"}
+    assert metric_tokens("15–20 hours, 12-18 incidents") == {"15", "20", "12", "18"}
 
 
 # ---------- truth guard ----------
@@ -148,6 +151,16 @@ def test_wrong_dates(start, end):
 
 def test_inflated_title():
     assert kinds(check(good(roles=[role(0, title="Senior Data Engineer")]))) == [("title", "Senior Data Engineer")]
+
+
+def test_alt_title_accepted_but_not_others():
+    raw = json.loads(json.dumps(RAW))
+    raw["roles"][0]["alt_titles"] = ["Oracle DBA"]
+    g = TruthGuard(MasterResume.model_validate(raw))
+    ok = TailoredResume.model_validate(good(roles=[role(0, title="Oracle DBA")]))
+    bad = TailoredResume.model_validate(good(roles=[role(0, title="Senior Oracle DBA")]))
+    assert g.check(ok) == []
+    assert kinds(g.check(bad)) == [("title", "Senior Oracle DBA")]
 
 
 def test_wrong_client():
