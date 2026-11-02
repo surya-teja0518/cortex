@@ -19,11 +19,14 @@ rate_limits:   # requests per minute
   llm: 60      # global cap per agent; each provider also has its own rpm below
 
 # LLM providers and per-agent routes. Keys come from .env (GROQ_API_KEY, GEMINI_API_KEY); never put them here.
-# Model names change: run `cortex llm-check` after editing. VERIFY cloud model ids in each provider's console.
+# Model ids change: run `cortex llm-check` after editing. Ids below were picked from each account's own
+# model list on 2026-11-02. Pin exact versions (not *-latest aliases) so eval results stay reproducible.
+# `extra` is merged into the request body as-is (provider-specific knobs).
 llm:
   providers:
-    groq:   {model: llama-3.3-70b-versatile, rpm: 25}          # VERIFY model id in Groq console
-    gemini: {model: gemini-2.5-flash, rpm: 10}                 # VERIFY model id in Google AI Studio
+    groq:      {model: openai/gpt-oss-120b, rpm: 25, extra: {reasoning_effort: low}}
+    groq_qwen: {kind: groq, model: qwen/qwen3.8-27b, rpm: 25}
+    gemini:    {model: gemini-3.8-flash, rpm: 10}
     ollama_8b:     {kind: ollama, model: "qwen3:8b",      num_ctx: 12288, think: false}
     ollama_granite: {kind: ollama, model: "granite4.2:8b", num_ctx: 12288, think: false}
     ollama_small:  {kind: ollama, model: "qwen3:4b",      num_ctx: 4096,  think: false}

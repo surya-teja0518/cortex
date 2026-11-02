@@ -59,7 +59,8 @@ class _HTTPProvider:
         return f"{type(self).__name__}(model={self.model!r})"
 
     def _redact(self, text: str) -> str:
-        return text.replace(self._secret, "***") if self._secret else text
+        # Only redact real-looking secrets: a 1-char test key would otherwise mangle every matching letter.
+        return text.replace(self._secret, "***") if self._secret and len(self._secret) >= 8 else text
 
     def _post(self, url: str, json: dict, headers: dict) -> dict:
         self.limiter.wait()
@@ -85,14 +86,16 @@ class GroqProvider(_HTTPProvider):
     name = "groq"
     URL = "https://api.groq.com/openai/v1/chat/completions"
 
-    def __init__(self, model: str, rpm: int = 25, max_tokens: int = 2048, client: httpx.Client | None = None):
+    def __init__(self, model: str, rpm: int = 25, max_tokens: int = 2048, extra: dict | None = None,
+                 client: httpx.Client | None = None):
         super().__init__(model, rpm, client)
         self._secret = get_secret("GROQ_API_KEY")
         self.max_tokens = max_tokens
+        self.extra = extra or {}   # e.g. {"reasoning_effort": "low"} for reasoning models
 
     def complete(self, prompt: str, schema: dict | None = None) -> str:
         body = {"model": self.model, "messages": [{"role": "user", "content": prompt}], "temperature": 0,
-                "max_tokens": self.max_tokens, "response_format": {"type": "json_object"}}
+                "max_tokens": self.max_tokens, "response_format": {"type": "json_object"}, **self.extra}
         data = self._post(self.URL, body, {"Authorization": f"Bearer {self._secret}"})
         try:
             return data["choices"][0]["message"]["content"]
@@ -187,7 +190,8 @@ def build_provider(name: str, spec: dict, client: httpx.Client | None = None):
     kind = spec.get("kind", name)
     common = {"client": client} if client else {}
     if kind == "groq":
-        return GroqProvider(spec["model"], rpm=spec.get("rpm", 25), max_tokens=spec.get("max_tokens", 2048), **common)
+        return GroqProvider(spec["model"], rpm=spec.get("rpm", 25), max_tokens=spec.get("max_tokens", 2048),
+                            extra=spec.get("extra"), **common)
     if kind == "gemini":
         return GeminiProvider(spec["model"], rpm=spec.get("rpm", 10), max_tokens=spec.get("max_tokens", 2048), **common)
     if kind == "ollama":

@@ -56,6 +56,23 @@ def test_groq_request_and_parse():
     assert body["response_format"] == {"type": "json_object"}
 
 
+def test_groq_extra_params_and_config_build():
+    from cortex.core.config import load_config
+    from cortex.llm.providers import build_provider
+    c, seen = mock(lambda r: httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]}))
+    spec = load_config("config.yaml")["llm"]["providers"]["groq"]
+    build_provider("groq", spec, client=c).complete("json please")
+    body = json.loads(seen[0].content)
+    assert body["model"] == spec["model"] and body["reasoning_effort"] == "low"
+    assert body["response_format"] == {"type": "json_object"}
+
+
+def test_config_pins_versions_not_latest_aliases():
+    from cortex.core.config import load_config
+    models = [p["model"] for p in load_config("config.yaml")["llm"]["providers"].values()]
+    assert not [m for m in models if "latest" in m]
+
+
 def test_gemini_key_in_header_not_url():
     c, seen = mock(lambda r: httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": '{"a":'}, {"text": "1}"}]}}]}))
     p = GeminiProvider("gemini-x", client=c)
@@ -109,6 +126,13 @@ def test_http_errors(status, exc):
     with pytest.raises(exc) as e:
         GroqProvider("m", client=c).complete("p")
     assert GROQ_KEY not in str(e.value)                     # redacted even if the API echoes it
+
+
+def test_short_secret_does_not_mangle_errors(monkeypatch):
+    monkeypatch.setenv("GROQ_API_KEY", "y")
+    c, _ = mock(lambda r: httpx.Response(400, text="API key not valid"))
+    with pytest.raises(ProviderError, match="API key not valid"):
+        GroqProvider("m", client=c).complete("p")
 
 
 def test_network_errors_become_provider_errors():
