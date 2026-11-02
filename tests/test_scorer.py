@@ -4,8 +4,6 @@ import pytest
 
 from cortex.agents.scorer import (
     FakeProvider,
-    GeminiProvider,
-    GroqProvider,
     LLMScorer,
     ScoringInput,
     parse_llm_output,
@@ -117,17 +115,6 @@ def test_audit_has_no_jd_or_secret(tmp_path):
     text = audit.path.read_text()
     assert "SECRETJDMARKER" not in text and "sk-SUPERSECRET" not in text
     assert audit.verify()
-
-
-def test_stub_providers_need_key_and_make_no_calls(monkeypatch):
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    with pytest.raises(RuntimeError, match="GEMINI_API_KEY"):
-        GeminiProvider()
-    monkeypatch.setenv("GROQ_API_KEY", "gsk-TESTKEY")
-    g = GroqProvider()
-    assert "gsk-TESTKEY" not in repr(g)
-    with pytest.raises(NotImplementedError):
-        g.score_job("x")
 
 
 @pytest.mark.parametrize("raw", [None, 12345, b'{"score": 88, "reasons": ["x"]}', ["x"], 3.5])
