@@ -1,4 +1,4 @@
-"""cortex import <csv...> | stats | compare | eval | tailor <job_id> | llm-check | bench"""
+"""cortex import <csv...> | stats | compare | eval | tailor <job_id> | packet <job_id> | llm-check | bench"""
 import argparse
 import os
 import statistics
@@ -104,6 +104,29 @@ def cmd_tailor(a, uid):
         print("   open the dashboard to approve or reject")
 
 
+def packet_builder(master_path: str = "master_resume.yaml", contact_path: str = "contact.yaml"):
+    """PacketBuilder from the local master + contact files, or (None, reason) if either is missing/invalid."""
+    from cortex.agents.packet import PacketBuilder, PacketError, load_contact
+    from cortex.core.resume import load_master
+    try:
+        return PacketBuilder(load_master(master_path), load_contact(contact_path)), None
+    except (OSError, ValueError, PacketError) as e:
+        return None, str(e)
+
+
+def cmd_packet(a, uid):
+    """Build (or retry) the packet for an approved job: resume.pdf + job.md under packets/."""
+    from cortex.graph import Deps, build_graph, build_packet, open_checkpointer
+
+    builder, why = packet_builder(a.master, a.contact)
+    if builder is None:
+        raise SystemExit(f"cannot build packets: {why}")
+    ses = _session()
+    app = build_graph(Deps(session_factory=lambda: ses, audit=AuditLog(), packet=builder), open_checkpointer())
+    st = build_packet(app, ses, uid, a.job_id)
+    print(f"job {a.job_id}: packet at {st['packet_path']}  (CORTEX never submits: apply yourself)")
+
+
 def cmd_llm_check(a, uid):
     """Ping every configured provider with a tiny JSON prompt. Prints OK/latency or the (redacted) error."""
     import time
@@ -164,6 +187,11 @@ def main(argv=None):
     t.add_argument("--provider", default=None, help="pin one provider (must be local: the route refuses others)")
     t.add_argument("--master", default="master_resume.yaml")
     t.set_defaults(fn=cmd_tailor)
+    k = sub.add_parser("packet", help="build/retry the PDF packet for an approved job")
+    k.add_argument("job_id", type=int)
+    k.add_argument("--master", default="master_resume.yaml")
+    k.add_argument("--contact", default="contact.yaml")
+    k.set_defaults(fn=cmd_packet)
     sub.add_parser("llm-check", help="ping every configured LLM provider").set_defaults(fn=cmd_llm_check)
     b = sub.add_parser("bench", help="benchmark local models on the real tailor task")
     b.add_argument("--providers", default="ollama_8b,ollama_granite", help="comma-separated provider names")

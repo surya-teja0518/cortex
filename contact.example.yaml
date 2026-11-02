@@ -1,0 +1,8 @@
+# EXAMPLE ONLY. Copy to contact.yaml (gitignored) and fill in your real details.
+# Used only for the resume PDF header. Kept out of master_resume.yaml on purpose: Truth Guard reads that file.
+name: Alex Example
+location: Hyderabad, India
+email: alex@example.com
+phone: "+91 00000 00000"
+linkedin: linkedin.com/in/alex-example
+github: github.com/alex-example
