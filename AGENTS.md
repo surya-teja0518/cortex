@@ -69,6 +69,10 @@ LLM layer (merged PR #5; model ids fixed on branch fix/llm-models):
 - Local models on Surya's Mac (M5, 16GB): qwen3:8b (tailor default), granite4.2:8b (challenger), qwen3:4b (scorer fallback). Measured: qwen3:8b ~25 tok/s, structured JSON + think:false OK.
 - TAILOR BENCH (2026-11-02, M5 16GB, n=2 each): qwen3:8b 2/2 passed Truth Guard first try, avg 83s/job (max 93s); granite4.2:8b 2/2, avg 89s (max 102s). Meets ~90s target: bullet-selection mode NOT needed; qwen3:8b stays default. Passing Truth Guard != good tailoring: human review in the gate.
 - stack_fit ablation: 142/362 scored, then Groq daily token quota hit (gpt-oss-120b reasoning tokens, ~500 calls/day). Resume after 05:30 IST reset; same model only. Eval abort message now includes the provider's last error (router.last_error) and flags daily quotas.
+PACKET (branch feat/packet): `agents/packet.py` + graph node `record --approved--> packet -> END`.
+- Writes `packets/<user>/<job_id>-<company>-<title>/resume.pdf` (ReportLab, A4, one-page layout, dates right-aligned) + `job.md` (apply link, "never submits"). Contact header from gitignored `contact.yaml` (`contact.example.yaml` is fictional), never in the master.
+- Safety: re-runs Truth Guard against the current master before rendering (refuses on drift); XML-escapes ALL text (ReportLab Paragraph parses <a href>/<font>: a test proves no /URI link gets created); folder names slugged + checked under packets root; apply link kept only if http(s).
+- Failure (e.g. no contact.yaml) after approval: approval stays recorded, thread waits at `packet`; `cortex packet <job_id>` (build_packet) resumes the checkpointed thread without re-tailoring. `packets` table records paths. Dashboard shows packet path or the failure.
 NOT built yet: cover note, pre-filled answers, Apify adapter, tracker agent, scheduler, email digest.
 
 ## Build order (each step must be usable on its own)

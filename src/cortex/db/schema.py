@@ -118,6 +118,18 @@ class TailoredResumeRow(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
+class PacketRow(Base):
+    """Where the packet for an approved run was written (resume.pdf + job.md). New table, so existing
+    databases pick it up via create_all without a migration."""
+    __tablename__ = "packets"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    job_id: Mapped[int] = mapped_column(Integer, index=True)
+    thread_id: Mapped[str] = mapped_column(String(128), unique=True)
+    path: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
 def get_session(url: str = "sqlite:///data/cortex.db"):
     engine = create_engine(url)
     Base.metadata.create_all(engine)

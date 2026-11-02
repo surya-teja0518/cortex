@@ -60,7 +60,12 @@ def _checkpointer():
     return open_checkpointer()
 
 
-gate = build_graph(Deps(session_factory=lambda: session, audit=AuditLog()), _checkpointer())
+from cortex.cli import packet_builder
+
+_builder, _why = packet_builder()
+if _builder is None:
+    st.warning(f"Packets disabled until fixed: {_why}. Approvals still work; run `cortex packet <job_id>` later.")
+gate = build_graph(Deps(session_factory=lambda: session, audit=AuditLog(), packet=_builder), _checkpointer())
 pending = pending_approvals(session, uid)
 if not pending:
     st.info("Nothing waiting for approval.")
@@ -73,5 +78,12 @@ for p in pending:
         c1, c2 = st.columns(2)
         for col, label, decision in ((c1, "Approve", "approve"), (c2, "Reject", "reject")):
             if col.button(label, key=f"{decision}-{p['job_id']}"):
-                submit_decision(gate, session, uid, p["job_id"], {"decision": decision, "note": note or None})
+                out = submit_decision(gate, session, uid, p["job_id"], {"decision": decision, "note": note or None})
+                if out.get("packet_error"):
+                    st.session_state["packet_msg"] = f"Approved, but the packet failed: {out['packet_error']}"
+                elif out.get("packet_path"):
+                    st.session_state["packet_msg"] = f"Approved. Packet ready: {out['packet_path']}"
                 st.rerun()
+
+if st.session_state.get("packet_msg"):
+    st.info(st.session_state.pop("packet_msg"))

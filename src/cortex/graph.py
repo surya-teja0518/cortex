@@ -1,7 +1,7 @@
-"""Per-job LangGraph: Tailor -> Truth Guard -> [HUMAN APPROVAL GATE] -> record decision.
+"""Per-job LangGraph: Tailor -> Truth Guard -> [HUMAN APPROVAL GATE] -> record -> Packet.
 
-    START -> tailor_and_guard --passed--> approval (interrupt) -> record -> END
-                              \\-manual_review / guard_rejected-> END
+    START -> tailor_and_guard --passed--> approval (interrupt) -> record --approved--> packet -> END
+                              \\-manual_review / guard_rejected-> END   \\-rejected-> END
 
 One graph run = one LangGraph *thread* (thread_id), checkpointed to SQLite after every node.
 - `interrupt()` in `approval` pauses the run and persists it; nothing downstream runs until a
@@ -10,6 +10,9 @@ One graph run = one LangGraph *thread* (thread_id), checkpointed to SQLite after
   resumes from the last completed node. Completed nodes (the LLM tailoring) are NOT re-run.
 - On resume, the interrupted node runs again from its first line, so `approval` has no side effects
   before `interrupt()`; all writes happen in `record`, which is idempotent.
+- `packet` runs only on the approved branch. If it fails (e.g. contact.yaml missing), the approval is
+  already recorded and checkpointed; the thread waits at `packet` and `build_packet` resumes it later
+  without asking for approval again.
 """
 import json
 import sqlite3
@@ -26,11 +29,13 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
+from cortex.agents.packet import PacketBuilder, PacketError
 from cortex.agents.scorer import ScoringInput, render_job_fields
 from cortex.agents.tailor import Tailor
 from cortex.agents.truth_guard import TruthGuard, guarded_tailor
 from cortex.core.audit import AuditLog
-from cortex.db.schema import ApprovalRow, JobRow, TailoredResumeRow
+from cortex.core.resume import TailoredResume
+from cortex.db.schema import ApprovalRow, JobRow, PacketRow, TailoredResumeRow
 
 
 class JobState(TypedDict, total=False):
@@ -42,6 +47,7 @@ class JobState(TypedDict, total=False):
     violations: list[str]
     attempts: int
     decision: dict
+    packet_path: str
 
 
 class ApprovalDecision(BaseModel):
@@ -57,6 +63,7 @@ class Deps:
     audit: AuditLog
     guard: TruthGuard | None = None
     tailor: Tailor | None = None  # None in the dashboard: it only resumes, never tailors
+    packet: PacketBuilder | None = None   # None -> approved threads wait at `packet` until configured
 
 
 def open_checkpointer(path: str = "data/checkpoints.db") -> SqliteSaver:
@@ -120,16 +127,36 @@ def build_graph(deps: Deps, checkpointer):
             deps.audit.log("approval", status, user_id=uid, job_id=jid, thread_id=tid)
         return {"status": status}
 
+    def packet(state: JobState) -> dict:
+        uid, jid, tid = state["user_id"], state["job_id"], state["thread_id"]
+        if deps.packet is None:
+            raise PacketError("packet builder not configured: needs master_resume.yaml and contact.yaml")
+        ses = deps.session_factory()
+        job = ses.scalar(select(JobRow).where(JobRow.id == jid, JobRow.user_id == uid))
+        if job is None:
+            raise PacketError("job not found for this user")
+        res = deps.packet.build(TailoredResume.model_validate(state["resume"]), user_id=uid, job_id=jid,
+                                company=job.company, title=job.title, location=job.location or "", url=job.url)
+        row = ses.scalar(select(PacketRow).where(PacketRow.thread_id == tid)) or \
+            PacketRow(user_id=uid, job_id=jid, thread_id=tid)
+        row.path = str(res.folder)
+        ses.add(row)
+        ses.commit()
+        deps.audit.log("packet", "built", user_id=uid, job_id=jid, thread_id=tid)
+        return {"packet_path": str(res.folder)}
+
     g = StateGraph(JobState)
     g.add_node("tailor_and_guard", tailor_and_guard)
     g.add_node("approval", approval)
     g.add_node("record", record)
+    g.add_node("packet", packet)
     g.add_edge(START, "tailor_and_guard")
     g.add_conditional_edges("tailor_and_guard",
                             lambda s: "approval" if s["status"] == "pending_approval" else END,
                             ["approval", END])
     g.add_edge("approval", "record")
-    g.add_edge("record", END)
+    g.add_conditional_edges("record", lambda s: "packet" if s["status"] == "approved" else END, ["packet", END])
+    g.add_edge("packet", END)
     return g.compile(checkpointer=checkpointer)
 
 
@@ -161,5 +188,23 @@ def submit_decision(app, session, user_id: str, job_id: int, decision: dict) -> 
     state = app.get_state(_cfg(row.thread_id))
     if state.next != ("approval",):
         raise RuntimeError("graph is not paused at the approval gate")
-    app.invoke(Command(resume=d.model_dump()), _cfg(row.thread_id))
+    try:
+        app.invoke(Command(resume=d.model_dump()), _cfg(row.thread_id))
+    except PacketError as e:   # decision is recorded; only the packet failed and can be retried
+        return {**app.get_state(_cfg(row.thread_id)).values, "packet_error": str(e)}
+    return app.get_state(_cfg(row.thread_id)).values
+
+
+def build_packet(app, session, user_id: str, job_id: int) -> JobState:
+    """(Re)run the packet step for the latest approved run of this job, resuming its graph thread."""
+    row = session.scalar(select(TailoredResumeRow).where(
+        TailoredResumeRow.user_id == user_id, TailoredResumeRow.job_id == job_id,
+        TailoredResumeRow.status == "approved").order_by(TailoredResumeRow.id.desc()))
+    if row is None:
+        raise LookupError("no approved tailored resume for this job")
+    state = app.get_state(_cfg(row.thread_id))
+    if state.next == ("packet",):
+        app.invoke(None, _cfg(row.thread_id))     # resume the checkpointed thread at the failed node
+    elif "packet_path" not in state.values:
+        raise RuntimeError("approved run has no pending packet step")
     return app.get_state(_cfg(row.thread_id)).values
