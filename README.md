@@ -10,6 +10,21 @@ Multi-agent job-search system. Human-in-the-loop by design: it prepares, **you**
 
 Rate limiter, audit log (hash-chained) and secrets wrap every external call.
 
+## Results (first real evaluation, 2026-11-02)
+An LLM job-relevance scorer (Groq, `openai/gpt-oss-120b`) lifted the ranking of jobs I actually applied to
+from the **51st to the 61st percentile**, against a rule-based baseline at chance, on **362 real postings**
+(60 applied).
+
+| | Rules | LLM |
+|---|---|---|
+| Mean percentile rank of applied jobs (50 = random) | 50.8 | **60.9** |
+| Applied jobs captured in the top bands (P0/P1) | 0% | **30%**, from only 17% of the queue (≈1.75× lift) |
+| Pos-vs-neg AUC (15 negatives only) | 0.34 | 0.58 |
+
+The LLM is above chance (rank z ≈ 2.9; top-band lift z ≈ 2.6). Its gap over the rules is borderline
+(z ≈ 1.9, approximate). A notes-leakage check came back clean; a `stack_fit` ablation is still open. Full method, confidence intervals, threats to validity and the questions
+this raises: **[docs/EVALUATION.md](docs/EVALUATION.md)**.
+
 ## Security principles
 - Job text is untrusted: sanitized, injection-flagged, delimited before any LLM sees it
 - Every LLM output validated with Pydantic
