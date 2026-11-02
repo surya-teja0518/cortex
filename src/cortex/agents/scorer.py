@@ -18,7 +18,6 @@ from cortex.core.models import Band, ScoreResult
 from cortex.core.ratelimit import RateLimiter
 from cortex.core.sanitize import sanitize_jd, wrap_untrusted
 from cortex.core.scoring import band_for
-from cortex.core.secrets import get_secret
 
 MAX_ATTEMPTS = 2  # first call + one retry
 
@@ -125,40 +124,6 @@ class FakeProvider:
         if isinstance(r, Exception):
             raise r
         return r
-
-
-class _KeyedProvider:
-    name = "base"
-    secret_name = ""
-
-    def __init__(self, model: str):
-        self.model = model
-        self._api_key = get_secret(self.secret_name)  # never logged, never in repr
-
-    def __repr__(self) -> str:
-        return f"{type(self).__name__}(model={self.model!r})"
-
-    def score_job(self, job_text: str) -> str:
-        raise NotImplementedError(f"{self.name} provider not wired yet (step 2)")
-
-    def complete(self, prompt: str) -> str:  # tailor interface
-        raise NotImplementedError(f"{self.name} provider not wired yet (step 2)")
-
-
-class GeminiProvider(_KeyedProvider):
-    name = "gemini"
-    secret_name = "GEMINI_API_KEY"
-
-    def __init__(self, model: str = "gemini-2.0-flash"):
-        super().__init__(model)
-
-
-class GroqProvider(_KeyedProvider):
-    name = "groq"
-    secret_name = "GROQ_API_KEY"
-
-    def __init__(self, model: str = "llama-3.3-70b-versatile"):
-        super().__init__(model)
 
 
 _FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)

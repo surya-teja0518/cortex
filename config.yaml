@@ -14,6 +14,20 @@ scoring:
   min_yoe: {le3: 2, eq4: 1, eq5: -1}
   bands: {P0: 85, P1: 78, P2: 70}
 
-rate_limits:   # requests per minute per provider
+rate_limits:   # requests per minute
   apify: 10
-  llm: 12
+  llm: 60      # global cap per agent; each provider also has its own rpm below
+
+# LLM providers and per-agent routes. Keys come from .env (GROQ_API_KEY, GEMINI_API_KEY); never put them here.
+# Model names change: run `cortex llm-check` after editing. VERIFY cloud model ids in each provider's console.
+llm:
+  providers:
+    groq:   {model: llama-3.3-70b-versatile, rpm: 25}          # VERIFY model id in Groq console
+    gemini: {model: gemini-2.5-flash, rpm: 10}                 # VERIFY model id in Google AI Studio
+    ollama_8b:     {kind: ollama, model: "qwen3:8b",      num_ctx: 12288, think: false}
+    ollama_granite: {kind: ollama, model: "granite4.2:8b", num_ctx: 12288, think: false}
+    ollama_small:  {kind: ollama, model: "qwen3:4b",      num_ctx: 4096,  think: false}
+  routes:
+    scorer: [groq, gemini, ollama_small]   # public job text: cloud first, local fallback
+    tailor: [ollama_8b]                    # Surya's resume: local only
+  personal_data_routes: [tailor]           # enforced in code: these routes refuse non-local providers

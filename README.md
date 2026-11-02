@@ -30,6 +30,8 @@ cortex stats
 cortex compare        # CORTEX deterministic score vs SYNAPSE Match
 cortex eval           # recall@P0-P1, mean percentile rank; precision + AUC once there are >= 10 negatives
 cortex tailor <job_id> # tailor -> Truth Guard -> pauses at the approval gate (approve in the dashboard)
+cortex llm-check      # ping Groq / Gemini / local Ollama models from config.yaml
+cortex bench          # local models on the real tailor task: Truth Guard pass rate + seconds per job
 streamlit run src/cortex/ui/app.py --server.address 127.0.0.1
 ```
 Status: v0.3. Implemented: tracker import, gates, deterministic scorer, fuzzy dedupe, review UI
@@ -40,4 +42,6 @@ deterministic Truth Guard (skills, employers, titles, dates, projects, metrics, 
 scope; max 2 retries to the tailor, then reject). Truth Guard does not semantically verify paraphrased prose.
 Per-job LangGraph (tailor -> Truth Guard -> human approval `interrupt` -> record) checkpointed to SQLite:
 a crash resumes at the gate without re-running the LLM; approval only from the Streamlit dashboard.
-Not yet: live Gemini/Groq calls (stubs, so the tailor has no working LLM yet), resume PDF + cover note, precision metrics (need skip decisions as negatives), Apify adapter.
+LLM router: per-agent fallback chains (scorer: Groq -> Gemini -> local Ollama; tailor: local Ollama only, enforced in code
+because the prompt carries the resume). Live provider calls are exercised on the developer's machine; CI uses mocked HTTP.
+Not yet: resume PDF + cover note, real LLM eval numbers (pending runs on the developer machine), Apify adapter.
