@@ -22,11 +22,12 @@ Sequential LangGraph state machine, not a parallel hub:
 - **Scorer:** LLM relevance scoring + rules. If LLM is down/rate-limited: keep deterministic score, flag "LLM unscored", continue pipeline.
 - **Tailor:** tailored resume PDF + cover note from templates. Output validated with Pydantic.
 - **Truth Guard:** diff every claim (skills, experience, projects) against the master resume facts. Unsupported content → send back to Tailor with failure reason, **max 2 retries**, then Reject (logged).
-- **Human Approval Gate:** explicit LangGraph `interrupt`. Nothing downstream runs without approval. **Approval only via the Streamlit dashboard in v1 (no Telegram approval).**
+- **Human Approval Gate:** explicit LangGraph `interrupt`. Nothing downstream runs without approval. **Approval only via the Streamlit dashboard in v1 (never by email or any other channel).**
 - **Packet Agent:** builds an approval packet (resume PDF, cover note, direct apply link, pre-filled answers). **NEVER auto-submits applications.** Surya submits manually.
 - **Tracker Agent:** log application, track status, reminders, reports.
 - **Cross-cutting on every external call:** Rate limiter, Secrets manager (gitignored `.env`, never logged; OS keyring later, optional — do NOT claim "encrypted"), hash-chained Audit logger, Pydantic validation, `user_id`.
-- **Outputs:** Streamlit dashboard (local-only, with login before any exposure), Telegram notifier (output only), Eval harness (offline).
+- **Outputs:** Streamlit dashboard (local-only, with login before any exposure), email digest notifier (output only; replaced Telegram on 2026-11-02 by Surya's decision: free via Gmail SMTP + App Password, no extra app; SMS rejected as paid), Eval harness (offline).
+  Email digest rules: send only to Surya's own address; counts + company/title only, never resume content; no approve/act links (approval stays in the dashboard).
 - **LangGraph checkpointing in SQLite** so a crash resumes instead of restarting.
 
 ## Security rules (non-negotiable)
@@ -68,13 +69,13 @@ LLM layer (merged PR #5; model ids fixed on branch fix/llm-models):
 - Local models on Surya's Mac (M5, 16GB): qwen3:8b (tailor default), granite4.2:8b (challenger), qwen3:4b (scorer fallback). Measured: qwen3:8b ~25 tok/s, structured JSON + think:false OK.
 - TAILOR BENCH (2026-11-02, M5 16GB, n=2 each): qwen3:8b 2/2 passed Truth Guard first try, avg 83s/job (max 93s); granite4.2:8b 2/2, avg 89s (max 102s). Meets ~90s target: bullet-selection mode NOT needed; qwen3:8b stays default. Passing Truth Guard != good tailoring: human review in the gate.
 - stack_fit ablation: 142/362 scored, then Groq daily token quota hit (gpt-oss-120b reasoning tokens, ~500 calls/day). Resume after 05:30 IST reset; same model only. Eval abort message now includes the provider's last error (router.last_error) and flags daily quotas.
-NOT built yet: resume PDF + cover note, Apify adapter, packet, tracker agent, scheduler, Telegram.
+NOT built yet: cover note, pre-filled answers, Apify adapter, tracker agent, scheduler, email digest.
 
 ## Build order (each step must be usable on its own)
 1. **MVP (DONE, v0.2):** SYNAPSE import → dedupe → gates → deterministic score → Streamlit review list. Next for this step: import real Batch016 export, then the older batches (master first).
 2. LLM scorer + **eval harness** (compare LLM score vs deterministic score vs Surya's apply/skip decisions; precision/recall). This earns the resume line.
 3. Tailor + Truth Guard + approval gate (LangGraph interrupt, SQLite checkpointer).
-4. Packet + Telegram notifier + scheduler.
+4. Packet + email digest notifier + scheduler.
 Credit note (Claude Code only): Surya has $100 cloud-session credit expiring **Nov 5, 2026 1:29 PM IST** — front-load steps 1–3. One narrow task per session, tests must pass before finishing.
 
 ## SYNAPSE (existing pipeline to reuse as a source)
