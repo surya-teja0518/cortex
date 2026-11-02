@@ -3,6 +3,14 @@ import threading
 import time
 
 
+class NoLimit:
+    """For callers whose provider already rate-limits itself (the LLM router does, per provider).
+    Stacking a second limiter on top only slows every call down."""
+
+    def wait(self) -> None:
+        pass
+
+
 class RateLimiter:
     def __init__(self, per_minute: int):
         self.interval = 60.0 / per_minute
