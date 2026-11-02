@@ -41,6 +41,7 @@ class Router:
         self.schema = inline_refs(schema) if schema else None
         self.name = "+".join(p.name for p in providers)   # stable id for eval caching
         self.served_by: str | None = None
+        self.last_error: str | None = None   # provider's own message (already key-redacted), for diagnostics
 
     def complete(self, prompt: str) -> str:
         errors = []
@@ -50,6 +51,7 @@ class Router:
                 out = p.complete(prompt, schema=self.schema)
             except ProviderError as e:
                 errors.append(type(e).__name__)
+                self.last_error = str(e)[:300]
                 self.audit.log("llm_router", "call", route=self.route, provider=p.name, outcome="error",
                                error=type(e).__name__, seconds=round(time.monotonic() - t0, 2))
                 continue

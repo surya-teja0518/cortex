@@ -140,18 +140,42 @@ those hold 30% of my applications: ~1.75× lift, about 18 hits where random band
 **What would make you drop the claim?** If removing `stack_fit` drops the LLM back to ~50, or if a paired
 test shows no real gap vs the rules.
 
-## 7. Open items (in priority order)
+## 7. Tailor benchmark (local models, 2026-11-02)
+
+The tailor gets the full master resume, so it runs **only on local models** (enforced in code). Question:
+can a laptop-class model produce Truth-Guard-clean JSON fast enough? `cortex bench` runs the real tailor and
+Truth Guard loop (1 attempt + up to 2 retries with violation feedback) on the top real jobs. Nothing is written to the DB.
+
+Hardware: MacBook Air M5, 16 GB unified memory, Ollama, `num_ctx` 12288, `think: false`, schema-constrained JSON output.
+Prompt ≈ 6,300 tokens (master resume + rules + job fields).
+
+| Model | Jobs | Passed Truth Guard | Avg tries | Avg s/job | Max s |
+|---|---|---|---|---|---|
+| `qwen3:8b` (5.2 GB) | 2 | 2/2 | 1.0 | 83.0 | 92.9 |
+| `granite4.2:8b` (5.3 GB) | 2 | 2/2 | 1.0 | 89.0 | 101.5 |
+
+**Read it as:** both models produced schema-valid, claim-clean resumes on the first attempt, at ~1.5 min per job.
+That meets the ~90 s target, so the planned faster "bullet-selection" tailor mode was **not** needed. `qwen3:8b`
+stays the default.
+
+**Limits:** n = 2 per model, both Data Engineer roles. And passing Truth Guard means *no unsupported claims*,
+not *a good resume*: a model that copied the master verbatim would also pass. Tailoring quality needs human review
+in the approval gate (that's what the gate is for). Next: `--jobs 5`, plus a read-through of real tailored output.
+
+## 8. Open items (in priority order)
 
 1. ~~`notes` leakage check~~ (done: no sign of leakage). A no-notes ablation is optional confirmation.
 2. Ablation without `stack_fit` (SYNAPSE's own verdict): the most important remaining check.
-   Tooling done: `cortex eval --provider groq --exclude-fields stack_fit` (separate cache, labelled in the report). Run pending.
+   Tooling done: `cortex eval --provider groq --exclude-fields stack_fit` (separate cache, labelled in the report).
+   **142/362 scored**, then Groq's free-tier daily token quota for `gpt-oss-120b` ran out (it's a reasoning model;
+   ~500 scoring calls in one day). Resumes from the cache after the daily reset.
 3. Paired significance test for the LLM − rules gap. Tooling done: `cortex eval` now prints a paired
    bootstrap (same applied jobs, 2000 resamples, seed 0) with a 95% CI and one-sided P(diff ≤ 0). Number pending
    (it reads from the cache, so it costs nothing to rerun). ~~Band share for recall~~ (done: 17%, lift ≈ 1.75×; now a report column).
 4. Second model (`groq_qwen`) on identical inputs.
 5. More negatives via Skip decisions, so precision and AUC become meaningful.
 
-## 8. Reproduce
+## 9. Reproduce
 
 ```bash
 cortex import "<master>.csv" "<batch>.csv"     # tracker CSV exports, master first

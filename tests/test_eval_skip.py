@@ -304,3 +304,17 @@ def test_cli_eval_exclude_requires_provider(ses, tmp_path, monkeypatch):
     monkeypatch.setenv("CORTEX_DB_URL", f"sqlite:///{tmp_path}/t.db")
     with pytest.raises(SystemExit, match="only applies to an LLM run"):
         main(["eval", "--exclude-fields", "stack_fit"])
+
+
+def test_fail_fast_message_explains_daily_quota(ses, tmp_path):
+    from cortex.agents.scorer import LLMScorer
+    from cortex.eval import EvalAborted
+    from cortex.llm.providers import FakeLLM, RateLimitedError
+    from cortex.llm.router import Router
+    for i in range(1, 5):
+        add(ses, i, 70, "P2", status="applied" if i == 1 else "to_apply")
+    a = AuditLog(str(tmp_path / "a.log"))
+    err = RateLimitedError("groq: 429 rate limited (retry-after 7200s, after 0 retries)")
+    router = Router("scorer", [FakeLLM([err] * 20, name="groq")], a)
+    with pytest.raises(EvalAborted, match="retry-after 7200s.*daily quota"):
+        run_eval(ses, "u1", LLMScorer(router, NoWait(), a, BANDS), max_consecutive_failures=2)
