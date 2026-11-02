@@ -29,6 +29,14 @@ def keys(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", GEMINI_KEY)
 
 
+@pytest.fixture(autouse=True)
+def slept(monkeypatch):
+    """Record 429 backoff waits instead of sleeping (providers bind time.sleep at construction)."""
+    waits = []
+    monkeypatch.setattr("cortex.llm.providers.time.sleep", waits.append)
+    return waits
+
+
 def mock(handler):
     """httpx client whose every request goes to handler(request) -> httpx.Response. No network."""
     seen = []
@@ -238,6 +246,52 @@ def test_scorer_over_router_with_http_fallback(tmp_path):
     det = ScoreResult(track="data", score=70, band="P2", reasons=["base"])
     out = LLMScorer(router, NoWait(), a, {"P0": 85, "P1": 78, "P2": 70}).score(
         ScoringInput(source="t", external_id="1", title="Data Engineer", company="X"), det)
-    assert (out.score, out.band, out.source) == (88, "P0", "llm") and calls == ["groq", "gemini"]
+    assert (out.score, out.band, out.source) == (88, "P0", "llm")
+    assert calls == ["groq"] * 4 + ["gemini"]               # 3 backoff retries on groq, then fall back
     text = Path(tmp_path / "a.log").read_text()
     assert GROQ_KEY not in text and GEMINI_KEY not in text and a.verify()
+
+
+# ---------------- 429 backoff ----------------
+
+def _seq(*responses):
+    it = iter(responses)
+    return mock(lambda r: next(it))
+
+
+def test_429_waits_retry_after_then_succeeds(slept):
+    ok = httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+    c, seen = _seq(httpx.Response(429, headers={"retry-after": "7"}), httpx.Response(429), ok)
+    p = GroqProvider("m", client=c)
+    backoff = []
+    p._sleep = backoff.append                                   # record only the 429 backoff waits
+    assert p.complete("p") == "{}"
+    assert len(seen) == 3 and backoff == [7.0, 4.0] and p.retries_429 == 2   # header, then 2*2**1
+
+
+def test_429_gives_up_after_max_retries(slept):
+    from cortex.llm.providers import MAX_429_RETRIES
+    c, seen = mock(lambda r: httpx.Response(429, headers={"retry-after": "1"}))
+    with pytest.raises(RateLimitedError, match="after 3 retries"):
+        GroqProvider("m", client=c).complete("p")
+    assert len(seen) == MAX_429_RETRIES + 1
+
+
+def test_429_long_retry_after_means_daily_quota_no_wait(slept):
+    c, seen = mock(lambda r: httpx.Response(429, headers={"retry-after": "3600"}))
+    p = GroqProvider("m", client=c)
+    backoff = []
+    p._sleep = backoff.append
+    with pytest.raises(RateLimitedError, match="retry-after 3600s"):
+        p.complete("p")
+    assert len(seen) == 1 and backoff == []                    # no hour-long sleep: fall back immediately
+
+
+def test_429_retry_after_not_numeric_uses_backoff(slept):
+    ok = httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]})
+    c, _ = _seq(httpx.Response(429, headers={"retry-after": "Wed, 21 Oct 2026 07:28:00 GMT"}), ok)
+    p = GroqProvider("m", client=c)
+    backoff = []
+    p._sleep = backoff.append
+    p.complete("p")
+    assert backoff == [2.0]
