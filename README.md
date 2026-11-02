@@ -28,7 +28,7 @@ cp .env.example .env
 cortex import data/import/<master>.csv data/import/<batch>.csv   # master first, then batches oldest -> newest
 cortex stats
 cortex compare        # CORTEX deterministic score vs SYNAPSE Match
-cortex eval           # recall@P0-P1 + mean percentile rank vs real applied/interview/offer labels
+cortex eval           # recall@P0-P1, mean percentile rank; precision + AUC once there are >= 10 negatives
 cortex tailor <job_id> # tailor -> Truth Guard -> pauses at the approval gate (approve in the dashboard)
 streamlit run src/cortex/ui/app.py --server.address 127.0.0.1
 ```
