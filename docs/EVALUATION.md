@@ -62,12 +62,21 @@ roughly uniform (SD ≈ 28.9), so with 60 positives the SE ≈ 3.7. AUC: Hanley�
 |---|---|---|---|
 | Rules, mean pct rank | 50.8 | 43.5 – 58.1 | indistinguishable from random (z ≈ 0.2) |
 | LLM, mean pct rank | 60.9 | 53.6 – 68.2 | **above random (z ≈ 2.9)** |
-| LLM − rules gap | +10.1 | — | **borderline (z ≈ 1.9, unpaired approximation)**; a paired test on the same jobs is planned |
+| LLM − rules gap (unpaired approx.) | +10.1 | — | borderline (z ≈ 1.9); superseded by the paired test below |
+| **LLM − rules gap, paired bootstrap** | **+10.0** | **−1.4 – +21.4** | **one-sided p = 0.042**: the LLM beats the rules at the 5% level for the pre-stated direction; the two-sided interval just touches zero |
 | Rules, AUC | 0.34 | 0.18 – 0.50 | at or below chance |
 | LLM, AUC | 0.58 | 0.42 – 0.74 | includes 0.5: **not significant** with 15 negatives |
 
-**What is safe to claim:** the LLM ranks applied jobs above chance, and the rules don't. **What is not
-yet safe to claim:** that the gap between them is statistically significant, or any precision figure.
+**Paired test (added 2026-11-02, `cortex eval` on the cached results):** each of the 60 applied jobs is
+compared with itself (LLM percentile minus rules percentile), resampled 2000 times (seed 0). Mean gap
+**+10.0**, 95% CI **−1.4 to +21.4**, **P(gap ≤ 0) = 0.042**. The direction was fixed before the run
+("the LLM must beat the rules"), so a one-sided test is appropriate. The interval is wide because 60
+positives is a small sample and the rule scores are heavily tied (99% of jobs share a few P2/P3 values).
+The rerun also re-tried earlier failures: unscored jobs fell from 12 to 6, and the mean pct rank is 60.8.
+
+**What is safe to claim:** the LLM ranks applied jobs above chance (z ≈ 2.9), concentrates them in its top
+bands (lift ≈ 1.75×), and beats the rules by ~10 percentile points (one-sided p ≈ 0.04). **What is not safe
+to claim:** "significantly better" without the p-value and interval, or any precision figure.
 
 ### 4.2 Why precision@P0-P1 = 78% is not evidence
 Precision is computed over **labelled** jobs only, and 60 of the 75 labelled jobs (**80%**) are
@@ -137,6 +146,10 @@ choice is configurable; the eval compares providers on identical inputs.
 **Is 30% recall good?** On its own, no. What matters is that the LLM puts only 17% of jobs in P0/P1, and
 those hold 30% of my applications: ~1.75× lift, about 18 hits where random banding gives ~10.
 
+**Is the improvement over the rules statistically significant?** Paired over the same 60 applied jobs:
++10 percentile points, one-sided p ≈ 0.04 (bootstrap). Clearly above chance on its own; the 95% interval vs
+the rules is wide (−1.4 to +21.4) because 60 positives is small, so I'm adding labels to tighten it.
+
 **What would make you drop the claim?** If removing `stack_fit` drops the LLM back to ~50, or if a paired
 test shows no real gap vs the rules.
 
@@ -145,9 +158,9 @@ test shows no real gap vs the rules.
 1. ~~`notes` leakage check~~ (done: no sign of leakage). A no-notes ablation is optional confirmation.
 2. Ablation without `stack_fit` (SYNAPSE's own verdict): the most important remaining check.
    Tooling done: `cortex eval --provider groq --exclude-fields stack_fit` (separate cache, labelled in the report). Run pending.
-3. Paired significance test for the LLM − rules gap. Tooling done: `cortex eval` now prints a paired
-   bootstrap (same applied jobs, 2000 resamples, seed 0) with a 95% CI and one-sided P(diff ≤ 0). Number pending
-   (it reads from the cache, so it costs nothing to rerun). ~~Band share for recall~~ (done: 17%, lift ≈ 1.75×; now a report column).
+3. ~~Paired significance test~~ (done: +10.0, 95% CI −1.4 to +21.4, one-sided p = 0.042). To tighten it,
+   import the remaining tracker batches (more positives); already-scored jobs cost nothing.
+   ~~Band share for recall~~ (done: 17%, lift ≈ 1.75×; now a report column).
 4. Second model (`groq_qwen`) on identical inputs.
 5. More negatives via Skip decisions, so precision and AUC become meaningful.
 
