@@ -208,6 +208,10 @@ def guarded_tailor(tailor: TailorFn, guard: TruthGuard, audit: AuditLog,
             resume = None
             violations = [Violation(kind="schema", claim=str(err["loc"]), where="tailor output",
                                     reason=err["msg"]) for err in e.errors()[:10]]
+        except ValueError:  # unparseable output (bad JSON, non-str)
+            resume = None
+            violations = [Violation(kind="schema", claim="output", where="tailor output",
+                                    reason="not a JSON object matching TailoredResume")]
         except Exception as e:  # noqa: BLE001 — tailor (LLM) down; message may echo request details
             resume = None
             violations = [Violation(kind="tailor_error", claim=type(e).__name__, where="tailor", reason="tailor raised")]

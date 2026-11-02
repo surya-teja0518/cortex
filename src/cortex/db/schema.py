@@ -100,6 +100,24 @@ class LLMScoreCacheRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
+class TailoredResumeRow(Base):
+    """One tailoring run per row (one LangGraph thread). The dashboard reads pending rows from here;
+    the graph's own state lives in the LangGraph checkpointer, keyed by thread_id."""
+    __tablename__ = "tailored_resumes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    job_id: Mapped[int] = mapped_column(Integer, index=True)
+    thread_id: Mapped[str] = mapped_column(String(128), unique=True)
+    # manual_review | guard_rejected | pending_approval | approved | rejected
+    status: Mapped[str] = mapped_column(String(24), index=True)
+    resume_json: Mapped[str | None] = mapped_column(Text)
+    violations_json: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
 def get_session(url: str = "sqlite:///data/cortex.db"):
     engine = create_engine(url)
     Base.metadata.create_all(engine)

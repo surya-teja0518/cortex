@@ -54,8 +54,9 @@ class ScoringInput(BaseModel):
 PROMPT_FIELDS = ("title", "company", "location", "exp_raw", "stack_fit", "work_model", "notes", "description")
 
 
-def render_job(job: ScoringInput) -> tuple[str, list[str]]:
-    """Return (prompt, injection_flags). Flags are collected across ALL included fields."""
+def render_job_fields(job: ScoringInput) -> tuple[str, list[str]]:
+    """Return (job fields wrapped in <untrusted_job_text>, injection_flags across ALL included fields).
+    Shared by every agent that puts job text in a prompt (scorer, tailor)."""
     lines, flags = [], []
     for f in PROMPT_FIELDS:
         val = getattr(job, f)
@@ -64,7 +65,13 @@ def render_job(job: ScoringInput) -> tuple[str, list[str]]:
         clean, fl = sanitize_jd(val)
         flags += [f"{f}:{p}" for p in fl]
         lines.append(f"{f}: {clean}")
-    return PROMPT_TEMPLATE.format(job=wrap_untrusted("\n".join(lines))), flags
+    return wrap_untrusted("\n".join(lines)), flags
+
+
+def render_job(job: ScoringInput) -> tuple[str, list[str]]:
+    """Return (scorer prompt, injection_flags)."""
+    wrapped, flags = render_job_fields(job)
+    return PROMPT_TEMPLATE.format(job=wrapped), flags
 
 
 class LLMScore(BaseModel):
@@ -134,6 +141,9 @@ class _KeyedProvider:
     def score_job(self, job_text: str) -> str:
         raise NotImplementedError(f"{self.name} provider not wired yet (step 2)")
 
+    def complete(self, prompt: str) -> str:  # tailor interface
+        raise NotImplementedError(f"{self.name} provider not wired yet (step 2)")
+
 
 class GeminiProvider(_KeyedProvider):
     name = "gemini"
@@ -154,16 +164,20 @@ class GroqProvider(_KeyedProvider):
 _FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 
 
-def parse_llm_output(raw) -> LLMScore:
-    """Only ever raises ValueError or ValidationError (a ValueError subclass)."""
+def load_llm_json(raw):
+    """Parse raw model text (optionally ```json fenced```). Only ever raises ValueError."""
     if not isinstance(raw, str):
         raise ValueError(f"provider returned {type(raw).__name__}, expected str")  # noqa: TRY004 — contract is ValueError only
     m = _FENCE.match(raw)
     try:
-        data = json.loads(m.group(1) if m else raw)
+        return json.loads(m.group(1) if m else raw)
     except RecursionError as e:  # pathologically nested JSON
         raise ValueError("JSON nested too deeply") from e
-    return LLMScore.model_validate(data)
+
+
+def parse_llm_output(raw) -> LLMScore:
+    """Only ever raises ValueError or ValidationError (a ValueError subclass)."""
+    return LLMScore.model_validate(load_llm_json(raw))
 
 
 class LLMScorer:

@@ -1,4 +1,4 @@
-"""cortex import <csv...> | stats | compare | eval"""
+"""cortex import <csv...> | stats | compare | eval | tailor <job_id>"""
 import argparse
 import os
 import statistics
@@ -67,6 +67,27 @@ def cmd_eval(a, uid):
     print(format_report(run_eval(_session(), uid, scorer)))
 
 
+def cmd_tailor(a, uid):
+    """Start one tailoring run. It pauses at the approval gate; approve or reject in the dashboard."""
+    from cortex.agents.scorer import GeminiProvider, GroqProvider
+    from cortex.agents.tailor import Tailor
+    from cortex.agents.truth_guard import TruthGuard
+    from cortex.core.resume import load_master
+    from cortex.graph import Deps, build_graph, open_checkpointer, start_tailoring
+
+    cfg, master, audit, ses = load_config(a.config), load_master(a.master), AuditLog(), _session()
+    provider = {"gemini": GeminiProvider, "groq": GroqProvider}[a.provider]()
+    tailor = Tailor(provider, master, RateLimiter(cfg["rate_limits"]["llm"]), audit)
+    app = build_graph(Deps(session_factory=lambda: ses, audit=audit, guard=TruthGuard(master), tailor=tailor),
+                      open_checkpointer())
+    st = start_tailoring(app, ses, uid, a.job_id)
+    print(f"job {a.job_id}: {st['status']} (attempts={st.get('attempts', 0)})")
+    for v in st.get("violations") or []:
+        print(f"   {v}")
+    if st["status"] == "pending_approval":
+        print("   open the dashboard to approve or reject")
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="cortex")
     p.add_argument("--config", default=None)
@@ -80,6 +101,12 @@ def main(argv=None):
     e.add_argument("--provider", choices=["none", "gemini", "groq"], default="none",
                    help="LLM provider (gemini/groq are stubs until wired; their jobs fall back)")
     e.set_defaults(fn=cmd_eval)
+    t = sub.add_parser("tailor", help="tailor a resume for one job; pauses for approval in the dashboard")
+    t.add_argument("job_id", type=int)
+    t.add_argument("--provider", choices=["gemini", "groq"], default="gemini",
+                   help="(stubs until wired: runs end as guard_rejected/tailor_error)")
+    t.add_argument("--master", default="master_resume.yaml")
+    t.set_defaults(fn=cmd_tailor)
     a = p.parse_args(argv)
     a.fn(a, os.getenv("CORTEX_USER_ID", "surya"))
 

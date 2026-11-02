@@ -8,7 +8,8 @@ import streamlit as st
 from cortex.core.audit import AuditLog
 from cortex.core.secrets import get_secret
 from cortex.db.schema import get_session
-from cortex.review import record_skip, review_queue
+from cortex.graph import Deps, build_graph, open_checkpointer, submit_decision
+from cortex.review import pending_approvals, record_skip, review_queue
 
 st.set_page_config(page_title="CORTEX", layout="wide")
 
@@ -46,3 +47,31 @@ if st.button(f"Skip selected ({len(picked)})", disabled=not picked,
     for jid in picked:
         record_skip(session, uid, jid, audit)
     st.rerun()  # skipped jobs drop out of the queue
+
+
+# ---- Human approval gate (the ONLY place approvals happen in v1) ----
+st.header("Pending approvals")
+st.caption("Each resume below already passed Truth Guard. Approving records your decision; "
+           "it never submits an application.")
+
+
+@st.cache_resource
+def _checkpointer():
+    return open_checkpointer()
+
+
+gate = build_graph(Deps(session_factory=lambda: session, audit=AuditLog()), _checkpointer())
+pending = pending_approvals(session, uid)
+if not pending:
+    st.info("Nothing waiting for approval.")
+for p in pending:
+    with st.expander(f"{p['company']} | {p['role']} (Truth Guard passed after {p['attempts']} attempt(s))"):
+        if p["url"]:
+            st.link_button("Open job posting", p["url"])
+        st.json(p["resume"])
+        note = st.text_input("Note (optional)", key=f"note-{p['job_id']}", max_chars=500)
+        c1, c2 = st.columns(2)
+        for col, label, decision in ((c1, "Approve", "approve"), (c2, "Reject", "reject")):
+            if col.button(label, key=f"{decision}-{p['job_id']}"):
+                submit_decision(gate, session, uid, p["job_id"], {"decision": decision, "note": note or None})
+                st.rerun()
