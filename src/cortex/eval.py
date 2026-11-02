@@ -173,10 +173,13 @@ def run_eval(session, user_id: str, scorer: LLMScorer | None = None, progress: P
             failed_live = not hit and out.source != "llm" and "injection_flagged" not in out.flags
             streak = streak + 1 if failed_live else 0 if not hit else streak
             if streak >= max_consecutive_failures:
+                last = getattr(scorer.provider, "last_error", None)
+                hint = (" This looks like a daily quota: rerun after it resets."
+                        if last and "429" in last and "retry-after" in last else "")
                 raise EvalAborted(f"{streak} jobs in a row could not be scored by {scorer.provider.name}; stopping. "
-                                  f"{rep.llm_calls_cached + rep.llm_jobs_scored_live} results are cached, so a "
-                                  "rerun continues from here. Run `cortex llm-check` and look at the last "
-                                  "llm_router lines in data/audit.log.")
+                                  + (f"Last provider error: {last}.{hint} " if last else "")
+                                  + f"{rep.llm_calls_cached + rep.llm_jobs_scored_live} results are cached, so a "
+                                  "rerun continues from here.")
             if progress:
                 progress(done, len(pop), rep.llm_jobs_scored_live, rep.llm_calls_cached, unscored, clock() - t0)
         excl = "".join(f" -{f}" for f in sorted(scorer.exclude_fields))

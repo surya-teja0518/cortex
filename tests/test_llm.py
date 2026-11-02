@@ -295,3 +295,11 @@ def test_429_retry_after_not_numeric_uses_backoff(slept):
     p._sleep = backoff.append
     p.complete("p")
     assert backoff == [2.0]
+
+
+def test_router_keeps_last_error_message(tmp_path):
+    r = Router("scorer", [FakeLLM([RateLimitedError("groq: 429 rate limited (retry-after 7200s, after 0 retries)")],
+                                  name="groq")], audit(tmp_path))
+    with pytest.raises(AllProvidersFailed):
+        r.complete("p")
+    assert "retry-after 7200s" in r.last_error

@@ -66,7 +66,9 @@ LLM layer (merged PR #5; model ids fixed on branch fix/llm-models):
 - CLI: `cortex llm-check` (ping every provider), `cortex eval --provider route|<name>`, `cortex tailor` uses the tailor route, `cortex bench --providers ollama_8b,ollama_granite --jobs 5` (real tailor + Truth Guard loop, no DB writes; pass rate, tries, seconds).
 - Cloud models (picked 2026-11-02 from each account's own model list; pinned versions, never *-latest): Groq `openai/gpt-oss-120b` (reasoning_effort low) + `qwen/qwen3.8-27b` as `groq_qwen`; Gemini `gemini-3.8-flash`. The first guesses (llama-3.3-70b-versatile, gemini-2.5-flash) were retired: always check with `cortex llm-check`.
 - Local models on Surya's Mac (M5, 16GB): qwen3:8b (tailor default), granite4.2:8b (challenger), qwen3:4b (scorer fallback). Measured: qwen3:8b ~25 tok/s, structured JSON + think:false OK.
-NOT built yet: resume PDF + cover note, bullet-selection tailor mode (if bench shows rewrite is too slow), Apify adapter, packet, tracker agent, scheduler, Telegram.
+- TAILOR BENCH (2026-11-02, M5 16GB, n=2 each): qwen3:8b 2/2 passed Truth Guard first try, avg 83s/job (max 93s); granite4.2:8b 2/2, avg 89s (max 102s). Meets ~90s target: bullet-selection mode NOT needed; qwen3:8b stays default. Passing Truth Guard != good tailoring: human review in the gate.
+- stack_fit ablation: 142/362 scored, then Groq daily token quota hit (gpt-oss-120b reasoning tokens, ~500 calls/day). Resume after 05:30 IST reset; same model only. Eval abort message now includes the provider's last error (router.last_error) and flags daily quotas.
+NOT built yet: resume PDF + cover note, Apify adapter, packet, tracker agent, scheduler, Telegram.
 
 ## Build order (each step must be usable on its own)
 1. **MVP (DONE, v0.2):** SYNAPSE import → dedupe → gates → deterministic score → Streamlit review list. Next for this step: import real Batch016 export, then the older batches (master first).
