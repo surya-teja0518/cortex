@@ -156,3 +156,66 @@ def test_skips_counted_in_eval(ses):
     a = add(ses, 1, 80, "P1")
     record_skip(ses, "u1", a.id)
     assert run_eval(ses, "u1").skips == 1
+
+
+# --- negatives: exp_mismatch status + skips ---
+
+def test_pos_neg_auc():
+    from cortex.eval import pos_neg_auc
+    assert pos_neg_auc([90, 80], [70, 60]) == 1.0
+    assert pos_neg_auc([60], [70]) == 0.0
+    assert pos_neg_auc([70], [70]) == 0.5
+
+
+def _labelled(ses, n_neg=10):
+    # 2 positives (one P1, one P3), n_neg exp_mismatch negatives (one P1, rest P3)
+    add(ses, 1, 80, "P1", status="applied")
+    add(ses, 2, 60, "P3", status="applied")
+    add(ses, 3, 79, "P1", status="exp_mismatch")
+    for i in range(4, 3 + n_neg):
+        add(ses, i, 50, "P3", status="exp_mismatch")
+
+
+def test_precision_and_auc_from_exp_mismatch(ses):
+    _labelled(ses)
+    rep = run_eval(ses, "u1")
+    assert (rep.positives, rep.negatives, rep.negatives_from_status) == (2, 10, 10)
+    m = rep.metrics[0]
+    assert (m.precision_top, m.precision_n) == (0.5, 2)        # P1 band: 1 applied, 1 turned down
+    # pairs: 80 beats all 10; 60 beats the 9 scored 50, loses to 79 -> 19/20
+    assert m.auc == 19 / 20
+    out = format_report(rep)
+    assert "prec@P0-P1" in out and "50% (n=2)" in out and "0.95" in out and "ROUGH" in out
+
+
+def test_too_few_negatives_not_reported(ses):
+    _labelled(ses, n_neg=5)
+    rep = run_eval(ses, "u1")
+    assert rep.negatives == 5 and rep.metrics[0].auc is None and rep.metrics[0].precision_top is None
+    out = format_report(rep)
+    assert "PRECISION NOT REPORTED" in out and "prec@P0-P1" not in out
+
+
+def test_skips_are_negatives_and_applying_wins(ses):
+    pos = add(ses, 1, 80, "P1", status="applied")
+    for i in range(2, 12):
+        record_skip(ses, "u1", add(ses, i, 50, "P3").id)
+    record_skip(ses, "u1", pos.id)                       # skipped, then applied anyway: stays positive
+    rep = run_eval(ses, "u1")
+    assert (rep.positives, rep.negatives, rep.skips) == (1, 10, 11)
+    assert rep.metrics[0].auc == 1.0
+
+
+def test_not_accepting_and_closed_are_unlabelled(ses):
+    add(ses, 1, 80, "P1", status="applied")
+    for i, st in enumerate(["not_accepting", "closed"] * 6, start=2):
+        add(ses, i, 50, "P3", status=st)
+    assert run_eval(ses, "u1").negatives == 0
+
+
+def test_gated_negatives_counted_separately(ses):
+    _labelled(ses)
+    add(ses, 99, 50, "P3", status="exp_mismatch", gate_reason="min YOE 8 > 5")
+    rep = run_eval(ses, "u1")
+    assert rep.negatives == 10 and rep.negatives_gated == 1
+    assert "1 negative(s) were already blocked" in format_report(rep)
