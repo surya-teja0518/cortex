@@ -26,7 +26,7 @@ note: 1 positive(s) were blocked by deterministic gates and are excluded above; 
 |---|---|---|---|
 | **Mean percentile rank of applied jobs** | 50.8 | **60.9** | **Headline metric.** Rules ≈ chance; the LLM ranks the jobs I chose clearly above chance. |
 | Pos-vs-neg AUC | 0.34 | 0.58 | Direction is right, but only 15 negatives: not statistically reliable yet. |
-| Recall@P0-P1 | 0% | 30% | **Pending a check** (section 4.3): meaningful only if the LLM puts well under 30% of all jobs in P0/P1. |
+| Recall@P0-P1 | 0% | 30% | **Real lift: ~1.75×.** The LLM bands only 17% of jobs P0/P1, yet they hold 30% of applied jobs (section 4.3). |
 | Precision@P0-P1 | n/a | 78% (n=23) | **Not evidence.** It equals the base rate (section 4.2). |
 
 ## 2. Setup
@@ -74,8 +74,16 @@ Precision is computed over **labelled** jobs only, and 60 of the 75 labelled job
 positives. A random scorer would also get about 80%. 78% is the base rate, not skill. It becomes
 meaningful only with many more negatives (Skip decisions in the review UI).
 
-### 4.3 Recall@P0-P1 needs its denominator
-30% recall is lift only if the LLM bands well under 30% of all jobs as P0/P1. **Status: pending.** Check:
+### 4.3 Recall@P0-P1 needs its denominator (checked 2026-11-02)
+30% recall is lift only if the LLM bands well under 30% of all jobs as P0/P1. Band counts for the 350
+LLM-scored jobs: **P0 21, P1 39, P2 58, P3 232**, so P0/P1 = 60 jobs = **17%** of the queue.
+
+- 18 of 60 applied jobs (30%) sit in that top 17% → **lift ≈ 1.75×** over random banding.
+- Equivalently, 30% of P0/P1 jobs were applied to, vs **16.6%** of all jobs.
+- Random banding would put ~10.3 applied jobs in a 60-job top band; 18 is **z ≈ 2.6** above that (binomial approximation).
+- Conservative: unlabelled `to_apply` jobs count as "not applied" here, though some may be applied to later.
+
+Command used:
 ```bash
 sqlite3 data/cortex.db "select json_extract(result_json,'\$.band') band, count(*) from llm_score_cache where provider='groq' group by band;"
 ```
@@ -84,7 +92,7 @@ sqlite3 data/cortex.db "select json_extract(result_json,'\$.band') band, count(*
 
 | Threat | Status / mitigation |
 |---|---|
-| **Label leakage via `notes`.** If notes mention the outcome ("applied", "referral", "rejected"), the LLM could read the answer. | **OPEN.** Check notes by status (command below). If any leak, rerun with notes excluded (an ablation). |
+| **Label leakage via `notes`.** If notes mention the outcome ("applied", "referral", "rejected"), the LLM could read the answer. | **Checked, no sign of leakage** (keyword check, below): outcome-like words appear in 5/63 applied (7.9%) vs 22/237 to_apply (9.3%) notes, i.e. not more often for applied jobs. Keyword-based, so not proof; a no-notes ablation remains the definitive test. |
 | **`stack_fit` is SYNAPSE's own fit verdict** ("Azure-bullseye", "AWS-stretch"), produced by the system I used when deciding where to apply. | Known. The rules use it too, so the comparison is like for like, but some of the LLM's signal may be SYNAPSE's judgment re-read. Ablation planned: rerun without `stack_fit`. |
 | **Circularity with SYNAPSE's Match score.** I chose applications partly by looking at SYNAPSE's Match/Priority. | That score is **never** used as a baseline or shown to the LLM. Comparing against it would be circular. |
 | **Labels are preferences, not job quality.** "Applied" means "I chose it", not "it was a good job". | That's intended: the scorer's job is to predict my choices. It says nothing about interview or offer rates. |
@@ -94,7 +102,7 @@ sqlite3 data/cortex.db "select json_extract(result_json,'\$.band') band, count(*
 | **Model drift.** Provider models change or get retired (two were retired during this project). | Exact model id pinned (no `-latest` aliases); results cached by provider + prompt hash. |
 | **One run, one model.** | Second model (`qwen/qwen3.8-27b`) comparison planned; see section 7. |
 
-Leakage check (run locally; prints counts only):
+Leakage check (run locally; prints counts only). Result 2026-11-02: applied 5/63, to_apply 22/237, closed 0/7, exp_mismatch 0/15, not_accepting 0/48.
 ```bash
 sqlite3 data/cortex.db "select status, count(*) total, sum(lower(notes) like '%appl%' or lower(notes) like '%refer%' or lower(notes) like '%reject%' or lower(notes) like '%interview%') suspicious from jobs group by status;"
 ```
@@ -108,8 +116,9 @@ fields with cross-validation is a fair next comparison and hasn't been done yet.
 **Why mean percentile rank and not accuracy?** There's no threshold-free accuracy without negatives, and
 the rule bands are miscalibrated. Ranking is what the review queue actually uses.
 
-**How do you know the LLM isn't just reading the answer?** I don't fully know yet: see the `notes` and
-`stack_fit` threats in section 5. Both have a concrete check or ablation, and the claim is qualified until they're run.
+**How do you know the LLM isn't just reading the answer?** I checked the free-text `notes` field: outcome
+words like "applied" or "referral" are no more common for applied jobs (7.9%) than for unapplied ones (9.3%).
+The remaining risk is `stack_fit`, which is SYNAPSE's own fit verdict. A rerun without it is the planned ablation.
 
 **Is it reproducible?** Temperature 0, pinned model id, and every result cached by job, provider and
 SHA-256 of the exact prompt. Rerunning the same config reproduces the report from the cache. A fresh run
@@ -125,14 +134,17 @@ the LLM. Output must validate against a strict Pydantic schema (no extra fields)
 **Why `gpt-oss-120b`?** It was the strongest general model available on the free Groq account. The
 choice is configurable; the eval compares providers on identical inputs.
 
-**What would make you drop the claim?** If the `notes` check shows leakage and the no-notes ablation
-falls back to ~50, or if the paired test shows no real gap vs the rules.
+**Is 30% recall good?** On its own, no. What matters is that the LLM puts only 17% of jobs in P0/P1, and
+those hold 30% of my applications: ~1.75× lift, about 18 hits where random banding gives ~10.
+
+**What would make you drop the claim?** If removing `stack_fit` drops the LLM back to ~50, or if a paired
+test shows no real gap vs the rules.
 
 ## 7. Open items (in priority order)
 
-1. `notes` leakage check, then an ablation without `notes` if needed.
-2. Ablation without `stack_fit`.
-3. Paired significance test (bootstrap over the same jobs) for the LLM − rules gap; band share for recall.
+1. ~~`notes` leakage check~~ (done: no sign of leakage). A no-notes ablation is optional confirmation.
+2. Ablation without `stack_fit` (SYNAPSE's own verdict): the most important remaining check.
+3. Paired significance test (bootstrap over the same jobs) for the LLM − rules gap. ~~Band share for recall~~ (done: 17%, lift ≈ 1.75×).
 4. Second model (`groq_qwen`) on identical inputs.
 5. More negatives via Skip decisions, so precision and AUC become meaningful.
 
