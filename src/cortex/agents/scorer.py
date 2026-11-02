@@ -53,11 +53,17 @@ class ScoringInput(BaseModel):
 PROMPT_FIELDS = ("title", "company", "location", "exp_raw", "stack_fit", "work_model", "notes", "description")
 
 
-def render_job_fields(job: ScoringInput) -> tuple[str, list[str]]:
+def render_job_fields(job: ScoringInput, exclude: frozenset[str] = frozenset()) -> tuple[str, list[str]]:
     """Return (job fields wrapped in <untrusted_job_text>, injection_flags across ALL included fields).
-    Shared by every agent that puts job text in a prompt (scorer, tailor)."""
+    Shared by every agent that puts job text in a prompt (scorer, tailor).
+    `exclude` drops fields from the prompt entirely (eval ablations, e.g. without stack_fit)."""
+    unknown = set(exclude) - set(PROMPT_FIELDS)
+    if unknown:
+        raise ValueError(f"unknown prompt field(s) {sorted(unknown)}; valid: {PROMPT_FIELDS}")
     lines, flags = [], []
     for f in PROMPT_FIELDS:
+        if f in exclude:
+            continue
         val = getattr(job, f)
         if not val:
             continue
@@ -67,9 +73,9 @@ def render_job_fields(job: ScoringInput) -> tuple[str, list[str]]:
     return wrap_untrusted("\n".join(lines)), flags
 
 
-def render_job(job: ScoringInput) -> tuple[str, list[str]]:
+def render_job(job: ScoringInput, exclude: frozenset[str] = frozenset()) -> tuple[str, list[str]]:
     """Return (scorer prompt, injection_flags)."""
-    wrapped, flags = render_job_fields(job)
+    wrapped, flags = render_job_fields(job, exclude)
     return PROMPT_TEMPLATE.format(job=wrapped), flags
 
 
@@ -146,11 +152,14 @@ def parse_llm_output(raw) -> LLMScore:
 
 
 class LLMScorer:
-    def __init__(self, provider: LLMProvider, limiter: RateLimiter, audit: AuditLog, bands: dict):
+    def __init__(self, provider: LLMProvider, limiter: RateLimiter, audit: AuditLog, bands: dict,
+                 exclude_fields: frozenset[str] = frozenset()):
         self.provider = provider
         self.limiter = limiter
         self.audit = audit
         self.bands = bands
+        self.exclude_fields = frozenset(exclude_fields)
+        render_job_fields(ScoringInput(source="", external_id="", title="x", company="x"), self.exclude_fields)
 
     def _fallback(self, det: ScoreResult, flags: list[str]) -> ScorerOutcome:
         return ScorerOutcome(score=det.score, band=det.band, reasons=det.reasons,
@@ -160,7 +169,7 @@ class LLMScorer:
               prepared: tuple[str, list[str]] | None = None) -> ScorerOutcome:
         """`prepared` = render_job(job), if the caller already computed it."""
         job_ref = {"user_id": user_id, "source": job.source, "external_id": job.external_id}
-        prompt, inj = prepared or render_job(job)
+        prompt, inj = prepared or render_job(job, self.exclude_fields)
         if inj:
             # Flagged jobs never reach the LLM; they go to manual review.
             self.audit.log("scorer", "llm_skipped", reason="injection_flagged",

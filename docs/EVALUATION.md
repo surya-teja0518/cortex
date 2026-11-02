@@ -144,7 +144,10 @@ test shows no real gap vs the rules.
 
 1. ~~`notes` leakage check~~ (done: no sign of leakage). A no-notes ablation is optional confirmation.
 2. Ablation without `stack_fit` (SYNAPSE's own verdict): the most important remaining check.
-3. Paired significance test (bootstrap over the same jobs) for the LLM − rules gap. ~~Band share for recall~~ (done: 17%, lift ≈ 1.75×).
+   Tooling done: `cortex eval --provider groq --exclude-fields stack_fit` (separate cache, labelled in the report). Run pending.
+3. Paired significance test for the LLM − rules gap. Tooling done: `cortex eval` now prints a paired
+   bootstrap (same applied jobs, 2000 resamples, seed 0) with a 95% CI and one-sided P(diff ≤ 0). Number pending
+   (it reads from the cache, so it costs nothing to rerun). ~~Band share for recall~~ (done: 17%, lift ≈ 1.75×; now a report column).
 4. Second model (`groq_qwen`) on identical inputs.
 5. More negatives via Skip decisions, so precision and AUC become meaningful.
 
@@ -154,5 +157,6 @@ test shows no real gap vs the rules.
 cortex import "<master>.csv" "<batch>.csv"     # tracker CSV exports, master first
 cortex llm-check                                 # every provider answers
 cortex eval                                      # rules only
-cortex eval --provider groq                      # rules vs LLM (cached per job + provider + prompt hash)
+cortex eval --provider groq                      # rules vs LLM (cached per job + provider + prompt hash) + paired test
+cortex eval --provider groq --exclude-fields stack_fit   # ablation: same model, stack_fit removed from the prompt
 ```

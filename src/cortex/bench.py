@@ -15,14 +15,10 @@ from cortex.agents.scorer import ScoringInput, render_job_fields
 from cortex.agents.tailor import Tailor
 from cortex.agents.truth_guard import TruthGuard, guarded_tailor
 from cortex.core.audit import AuditLog
+from cortex.core.ratelimit import NoLimit
 from cortex.core.resume import MasterResume, TailoredResume
 from cortex.db.schema import JobRow
 from cortex.llm.router import Router
-
-
-class _NoWait:
-    def wait(self):
-        pass
 
 
 @dataclass
@@ -53,7 +49,7 @@ def run_bench(session, user_id: str, master: MasterResume, providers: list, audi
     for prov in providers:
         router = Router("tailor_bench", [prov], audit, personal_data=True,
                         schema=TailoredResume.model_json_schema())
-        tailor = Tailor(router, master, _NoWait(), audit)
+        tailor = Tailor(router, master, NoLimit(), audit)
         for j in jobs:
             wrapped, flags = render_job_fields(ScoringInput.from_row(j))
             if flags:

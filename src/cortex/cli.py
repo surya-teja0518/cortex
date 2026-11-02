@@ -8,7 +8,6 @@ from sqlalchemy import func, select
 
 from cortex.core.audit import AuditLog
 from cortex.core.config import load_config
-from cortex.core.ratelimit import RateLimiter
 from cortex.core.secrets import get_secret
 from cortex.db.schema import JobRow, get_session
 from cortex.sources.synapse_import import import_files
@@ -56,29 +55,45 @@ def cmd_compare(a, uid):
 def cmd_eval(a, uid):
     """Deterministic vs LLM scorer against real decisions. LLM results are cached per job + provider."""
     from cortex.agents.scorer import LLMScore, LLMScorer
-    from cortex.eval import format_report, run_eval
+    from cortex.core.ratelimit import NoLimit
+    from cortex.eval import EvalAborted, format_report, run_eval
     from cortex.llm.router import build_route
 
     cfg, audit = load_config(a.config), AuditLog()
     scorer = None
+    excl = frozenset(x.strip() for x in a.exclude_fields.split(",") if x.strip())
+    if excl and a.provider == "none":
+        raise SystemExit("--exclude-fields only applies to an LLM run: add --provider")
     if a.provider != "none":
         only = None if a.provider == "route" else a.provider
         router = build_route("scorer", cfg, audit, schema=LLMScore.model_json_schema(), only=only)
-        scorer = LLMScorer(router, RateLimiter(cfg["rate_limits"]["llm"]), audit, cfg["scoring"]["bands"])
-    print(format_report(run_eval(_session(), uid, scorer)))
+        # The router rate-limits per provider; a second limiter here would only slow every call down.
+        scorer = LLMScorer(router, NoLimit(), audit, cfg["scoring"]["bands"], exclude_fields=excl)
+
+    def progress(done, total, live, cached, unscored, secs):
+        if done % 10 and done != total:
+            return
+        eta = f"~{(total - done) * secs / live / 60:.0f} min left if the rest is uncached" if live else "cache only so far"
+        print(f"  {done}/{total}  live={live} cached={cached} unscored={unscored}  {secs / 60:.1f} min elapsed, {eta}",
+              file=sys.stderr, flush=True)
+    try:
+        print(format_report(run_eval(_session(), uid, scorer, progress=progress if scorer else None)))
+    except EvalAborted as e:
+        raise SystemExit(f"eval stopped: {e}") from None
 
 
 def cmd_tailor(a, uid):
     """Start one tailoring run. It pauses at the approval gate; approve or reject in the dashboard."""
     from cortex.agents.tailor import Tailor
     from cortex.agents.truth_guard import TruthGuard
+    from cortex.core.ratelimit import NoLimit
     from cortex.core.resume import TailoredResume, load_master
     from cortex.graph import Deps, build_graph, open_checkpointer, start_tailoring
     from cortex.llm.router import build_route
 
     cfg, master, audit, ses = load_config(a.config), load_master(a.master), AuditLog(), _session()
     router = build_route("tailor", cfg, audit, schema=TailoredResume.model_json_schema(), only=a.provider)
-    tailor = Tailor(router, master, RateLimiter(cfg["rate_limits"]["llm"]), audit)
+    tailor = Tailor(router, master, NoLimit(), audit)   # the router rate-limits per provider
     app = build_graph(Deps(session_factory=lambda: ses, audit=audit, guard=TruthGuard(master), tailor=tailor),
                       open_checkpointer())
     st = start_tailoring(app, ses, uid, a.job_id)
@@ -141,6 +156,8 @@ def main(argv=None):
     e = sub.add_parser("eval", help="deterministic vs LLM scorer against applied/interview/offer labels")
     e.add_argument("--provider", default="none",
                    help="none | route (the configured scorer fallback chain) | one provider name from config.yaml")
+    e.add_argument("--exclude-fields", default="",
+                   help="ablation: comma-separated job fields to leave out of the LLM prompt, e.g. stack_fit")
     e.set_defaults(fn=cmd_eval)
     t = sub.add_parser("tailor", help="tailor a resume for one job; pauses for approval in the dashboard")
     t.add_argument("job_id", type=int)
