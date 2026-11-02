@@ -10,11 +10,15 @@ Rules every provider follows:
   providers set it; the router enforces it.
 """
 import copy
+import time
 
 import httpx
 
 from cortex.core.ratelimit import RateLimiter
 from cortex.core.secrets import get_secret
+
+MAX_429_RETRIES = 3        # per request, on top of the normal rate limiter
+MAX_RETRY_WAIT = 60.0      # a longer retry-after means a daily quota: give up so the router can fall back
 
 
 class ProviderError(Exception):
@@ -54,6 +58,16 @@ class _HTTPProvider:
         self.limiter = RateLimiter(rpm)
         self._client = client or httpx.Client(timeout=self.timeout)
         self._secret: str | None = None
+        self._sleep = time.sleep   # injectable for tests
+        self.retries_429 = 0       # how often the provider told us to slow down (for diagnostics)
+
+    @staticmethod
+    def _retry_after(r: httpx.Response, attempt: int) -> float:
+        """Seconds to wait before retrying a 429: the server's retry-after if given, else 2, 4, 8..."""
+        try:
+            return max(0.0, float(r.headers.get("retry-after", "")))
+        except ValueError:
+            return 2.0 * 2 ** attempt
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(model={self.model!r})"
@@ -63,15 +77,25 @@ class _HTTPProvider:
         return text.replace(self._secret, "***") if self._secret and len(self._secret) >= 8 else text
 
     def _post(self, url: str, json: dict, headers: dict) -> dict:
-        self.limiter.wait()
-        try:
-            r = self._client.post(url, json=json, headers=headers)
-        except httpx.TimeoutException:
-            raise ProviderError(f"{self.name}: timeout") from None
-        except httpx.HTTPError as e:
-            raise ProviderError(f"{self.name}: {type(e).__name__}") from None
-        if r.status_code == 429:
-            raise RateLimitedError(f"{self.name}: 429 rate limited")
+        """POST with the provider's rate limit. On 429 (per-minute token/request caps on free tiers) wait as
+        long as the server asks and retry, up to MAX_429_RETRIES. A wait above MAX_RETRY_WAIT means a daily
+        quota, so raise RateLimitedError at once and let the router fall back."""
+        for attempt in range(MAX_429_RETRIES + 1):
+            self.limiter.wait()
+            try:
+                r = self._client.post(url, json=json, headers=headers)
+            except httpx.TimeoutException:
+                raise ProviderError(f"{self.name}: timeout") from None
+            except httpx.HTTPError as e:
+                raise ProviderError(f"{self.name}: {type(e).__name__}") from None
+            if r.status_code != 429:
+                break
+            wait = self._retry_after(r, attempt)
+            if attempt == MAX_429_RETRIES or wait > MAX_RETRY_WAIT:
+                raise RateLimitedError(f"{self.name}: 429 rate limited (retry-after {wait:.0f}s, "
+                                       f"after {attempt} retries)")
+            self.retries_429 += 1
+            self._sleep(wait)
         if r.status_code >= 400:
             reason = " ".join(self._redact(r.text).split())[:200]   # one line, key redacted, truncated
             raise ProviderError(f"{self.name}: HTTP {r.status_code}: {reason}")
