@@ -61,9 +61,11 @@ def cmd_eval(a, uid):
 
     cfg, audit = load_config(a.config), AuditLog()
     scorer = None
-    excl = frozenset(x.strip() for x in a.exclude_fields.split(",") if x.strip())
-    if excl and a.provider == "none":
+    if a.exclude_fields is not None and a.provider == "none":
         raise SystemExit("--exclude-fields only applies to an LLM run: add --provider")
+    # Default comes from config (llm.scorer_exclude_fields); "none" means include every field.
+    raw = a.exclude_fields if a.exclude_fields is not None else ",".join(cfg["llm"].get("scorer_exclude_fields", []))
+    excl = frozenset(x.strip() for x in raw.split(",") if x.strip() and x.strip() != "none")
     if a.provider != "none":
         only = None if a.provider == "route" else a.provider
         router = build_route("scorer", cfg, audit, schema=LLMScore.model_json_schema(), only=only)
@@ -179,8 +181,9 @@ def main(argv=None):
     e = sub.add_parser("eval", help="deterministic vs LLM scorer against applied/interview/offer labels")
     e.add_argument("--provider", default="none",
                    help="none | route (the configured scorer fallback chain) | one provider name from config.yaml")
-    e.add_argument("--exclude-fields", default="",
-                   help="ablation: comma-separated job fields to leave out of the LLM prompt, e.g. stack_fit")
+    e.add_argument("--exclude-fields", default=None,
+                   help="job fields left out of the LLM prompt (default: llm.scorer_exclude_fields in config, "
+                        "currently stack_fit); 'none' = include every field")
     e.set_defaults(fn=cmd_eval)
     t = sub.add_parser("tailor", help="tailor a resume for one job; pauses for approval in the dashboard")
     t.add_argument("job_id", type=int)

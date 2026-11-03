@@ -1,7 +1,9 @@
 # CORTEX scorer evaluation: evidence, method and limits
 
-> **Claim:** An LLM job-relevance scorer (Groq, `openai/gpt-oss-120b`) lifted the ranking of jobs I actually
-> applied to from the **51st to the 61st percentile**, against a rule-based baseline at chance, on **362 real postings**.
+> **Claim:** An LLM job-relevance scorer (Groq, `openai/gpt-oss-120b`) ranks jobs I actually applied to at the
+> **62nd percentile**, against a rule-based baseline at chance (51st), on **362 real postings** (paired bootstrap
+> one-sided p ≈ 0.03), with ~1.9× lift in its top bands. An ablation shows it doesn't depend on the upstream
+> pipeline's own fit label.
 
 This document is the evidence behind that sentence: what was measured, how, how sure we are, and what
 could make it wrong. Every number below comes from one `cortex eval` run on 2026-11-02, and the open
@@ -28,6 +30,33 @@ note: 1 positive(s) were blocked by deterministic gates and are excluded above; 
 | Pos-vs-neg AUC | 0.34 | 0.58 | Direction is right, but only 15 negatives: not statistically reliable yet. |
 | Recall@P0-P1 | 0% | 30% | **Real lift: ~1.75×.** The LLM bands only 17% of jobs P0/P1, yet they hold 30% of applied jobs (section 4.3). |
 | Precision@P0-P1 | n/a | 78% (n=23) | **Not evidence.** It equals the base rate (section 4.2). |
+
+## 1b. Ablation: without SYNAPSE's `stack_fit` (2026-11-03)
+
+`stack_fit` ("Azure-bullseye", "AWS-stretch"…) is SYNAPSE's own fit verdict, from the same system I used when
+deciding where to apply. If the LLM were mostly re-reading it, the result would say little about the LLM.
+`cortex eval --provider groq --exclude-fields stack_fit`, same model, same 362 jobs:
+
+```
+scorer                      recall@P0-P1  top share   lift  mean pct rank      prec@P0-P1  pos>neg AUC  llm_unscored
+deterministic                         0%         1%  0.00x           50.8       n/a (n=0)         0.34             -
+llm:groq -stack_fit                  45%        24%  1.89x           62.4      87% (n=31)         0.67             8
+paired (llm - deterministic) mean pct rank on the same 60 applied jobs: +11.5 [95% CI -0.4, +23.7], P(diff <= 0) = 0.031
+```
+
+| | With `stack_fit` | **Without** |
+|---|---|---|
+| Mean pct rank | 60.8 | **62.4** |
+| Top-band lift | 1.75× | **1.89×** |
+| AUC (15 negatives) | 0.58 | **0.67** |
+| Paired gap vs rules | +10.0, p = 0.042 | **+11.5, p = 0.031** |
+
+**Conclusion:** the ranking signal is the LLM's own; removing SYNAPSE's verdict leaves it **no worse**. The
+small improvement is within noise: don't claim `stack_fit` hurts. **Decision:** the scorer now excludes
+`stack_fit` by default (`llm.scorer_exclude_fields` in `config.yaml`; `--exclude-fields none` restores it),
+so CORTEX doesn't depend on SYNAPSE's judgment. Disclosure: this variant was chosen *after* seeing both runs;
+the reason is independence, not the score, and both runs are reported here. Precision 87% is still close
+to the 80% labelled base rate, so it remains not evidence.
 
 ## 2. Setup
 
@@ -62,12 +91,21 @@ roughly uniform (SD ≈ 28.9), so with 60 positives the SE ≈ 3.7. AUC: Hanley�
 |---|---|---|---|
 | Rules, mean pct rank | 50.8 | 43.5 – 58.1 | indistinguishable from random (z ≈ 0.2) |
 | LLM, mean pct rank | 60.9 | 53.6 – 68.2 | **above random (z ≈ 2.9)** |
-| LLM − rules gap | +10.1 | — | **borderline (z ≈ 1.9, unpaired approximation)**; a paired test on the same jobs is planned |
+| LLM − rules gap (unpaired approx.) | +10.1 | — | borderline (z ≈ 1.9); superseded by the paired test below |
+| **LLM − rules gap, paired bootstrap** | **+10.0** | **−1.4 – +21.4** | **one-sided p = 0.042**: the LLM beats the rules at the 5% level for the pre-stated direction; the two-sided interval just touches zero |
 | Rules, AUC | 0.34 | 0.18 – 0.50 | at or below chance |
 | LLM, AUC | 0.58 | 0.42 – 0.74 | includes 0.5: **not significant** with 15 negatives |
 
-**What is safe to claim:** the LLM ranks applied jobs above chance, and the rules don't. **What is not
-yet safe to claim:** that the gap between them is statistically significant, or any precision figure.
+**Paired test (added 2026-11-02, `cortex eval` on the cached results):** each of the 60 applied jobs is
+compared with itself (LLM percentile minus rules percentile), resampled 2000 times (seed 0). Mean gap
+**+10.0**, 95% CI **−1.4 to +21.4**, **P(gap ≤ 0) = 0.042**. The direction was fixed before the run
+("the LLM must beat the rules"), so a one-sided test is appropriate. The interval is wide because 60
+positives is a small sample and the rule scores are heavily tied (99% of jobs share a few P2/P3 values).
+The rerun also re-tried earlier failures: unscored jobs fell from 12 to 6, and the mean pct rank is 60.8.
+
+**What is safe to claim:** the LLM ranks applied jobs above chance (z ≈ 2.9), concentrates them in its top
+bands (lift ≈ 1.75×), and beats the rules by ~10 percentile points (one-sided p ≈ 0.04). **What is not safe
+to claim:** "significantly better" without the p-value and interval, or any precision figure.
 
 ### 4.2 Why precision@P0-P1 = 78% is not evidence
 Precision is computed over **labelled** jobs only, and 60 of the 75 labelled jobs (**80%**) are
@@ -93,7 +131,7 @@ sqlite3 data/cortex.db "select json_extract(result_json,'\$.band') band, count(*
 | Threat | Status / mitigation |
 |---|---|
 | **Label leakage via `notes`.** If notes mention the outcome ("applied", "referral", "rejected"), the LLM could read the answer. | **Checked, no sign of leakage** (keyword check, below): outcome-like words appear in 5/63 applied (7.9%) vs 22/237 to_apply (9.3%) notes, i.e. not more often for applied jobs. Keyword-based, so not proof; a no-notes ablation remains the definitive test. |
-| **`stack_fit` is SYNAPSE's own fit verdict** ("Azure-bullseye", "AWS-stretch"), produced by the system I used when deciding where to apply. | Known. The rules use it too, so the comparison is like for like, but some of the LLM's signal may be SYNAPSE's judgment re-read. Ablation planned: rerun without `stack_fit`. |
+| **`stack_fit` is SYNAPSE's own fit verdict** ("Azure-bullseye", "AWS-stretch"), produced by the system I used when deciding where to apply. | **Resolved by ablation (section 1b):** without it the LLM scores 62.4 (vs 60.8 with it). The signal is the LLM's own; `stack_fit` is now excluded by default. |
 | **Circularity with SYNAPSE's Match score.** I chose applications partly by looking at SYNAPSE's Match/Priority. | That score is **never** used as a baseline or shown to the LLM. Comparing against it would be circular. |
 | **Labels are preferences, not job quality.** "Applied" means "I chose it", not "it was a good job". | That's intended: the scorer's job is to predict my choices. It says nothing about interview or offer rates. |
 | **Selection bias.** I only saw what SYNAPSE scraped and surfaced. | The population is my real queue, which is exactly where the scorer runs. Not a claim about the job market. |
@@ -116,9 +154,10 @@ fields with cross-validation is a fair next comparison and hasn't been done yet.
 **Why mean percentile rank and not accuracy?** There's no threshold-free accuracy without negatives, and
 the rule bands are miscalibrated. Ranking is what the review queue actually uses.
 
-**How do you know the LLM isn't just reading the answer?** I checked the free-text `notes` field: outcome
+**How do you know the LLM isn't just reading the answer?** Two checks. The free-text `notes` field: outcome
 words like "applied" or "referral" are no more common for applied jobs (7.9%) than for unapplied ones (9.3%).
-The remaining risk is `stack_fit`, which is SYNAPSE's own fit verdict. A rerun without it is the planned ablation.
+And `stack_fit`, the upstream pipeline's own fit verdict: I reran the whole evaluation without it, and the LLM
+scored 62.4 vs 60.8 with it. So the signal is its own, and production now leaves that field out.
 
 **Is it reproducible?** Temperature 0, pinned model id, and every result cached by job, provider and
 SHA-256 of the exact prompt. Rerunning the same config reproduces the report from the cache. A fresh run
@@ -137,8 +176,12 @@ choice is configurable; the eval compares providers on identical inputs.
 **Is 30% recall good?** On its own, no. What matters is that the LLM puts only 17% of jobs in P0/P1, and
 those hold 30% of my applications: ~1.75× lift, about 18 hits where random banding gives ~10.
 
-**What would make you drop the claim?** If removing `stack_fit` drops the LLM back to ~50, or if a paired
-test shows no real gap vs the rules.
+**Is the improvement over the rules statistically significant?** Paired over the same 60 applied jobs:
++10 percentile points, one-sided p ≈ 0.04 (bootstrap). Clearly above chance on its own; the 95% interval vs
+the rules is wide (−1.4 to +21.4) because 60 positives is small, so I'm adding labels to tighten it.
+
+**What would make you drop the claim?** If more labelled data pulled the paired gap back to zero. The
+`stack_fit` ablation, which was the other risk, has been run and the result held.
 
 ## 7. Tailor benchmark (local models, 2026-11-02)
 
@@ -166,12 +209,12 @@ in the approval gate (that's what the gate is for). Next: `--jobs 5`, plus a rea
 
 1. ~~`notes` leakage check~~ (done: no sign of leakage). A no-notes ablation is optional confirmation.
 2. Ablation without `stack_fit` (SYNAPSE's own verdict): the most important remaining check.
-   Tooling done: `cortex eval --provider groq --exclude-fields stack_fit` (separate cache, labelled in the report).
-   **142/362 scored**, then Groq's free-tier daily token quota for `gpt-oss-120b` ran out (it's a reasoning model;
-   ~500 scoring calls in one day). Resumes from the cache after the daily reset.
-3. Paired significance test for the LLM − rules gap. Tooling done: `cortex eval` now prints a paired
-   bootstrap (same applied jobs, 2000 resamples, seed 0) with a 95% CI and one-sided P(diff ≤ 0). Number pending
-   (it reads from the cache, so it costs nothing to rerun). ~~Band share for recall~~ (done: 17%, lift ≈ 1.75×; now a report column).
+   **Done (2026-11-03):** without `stack_fit` the LLM ranks applied jobs at **62.4** (vs 60.8 with it), lift
+   1.89×, AUC 0.67, paired +11.5 (p = 0.031). The signal is the LLM's own, so `stack_fit` is now excluded by
+   default (`llm.scorer_exclude_fields`). See section 1b.
+3. ~~Paired significance test~~ (done: +10.0, 95% CI −1.4 to +21.4, one-sided p = 0.042 with `stack_fit`;
+   +11.5, CI −0.4 to +23.7, p = 0.031 without). To tighten it, import the remaining tracker batches (more
+   positives); already-scored jobs cost nothing. ~~Band share for recall~~ (done; now a report column).
 4. Second model (`groq_qwen`) on identical inputs.
 5. More negatives via Skip decisions, so precision and AUC become meaningful.
 

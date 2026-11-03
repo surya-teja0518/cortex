@@ -318,3 +318,22 @@ def test_fail_fast_message_explains_daily_quota(ses, tmp_path):
     router = Router("scorer", [FakeLLM([err] * 20, name="groq")], a)
     with pytest.raises(EvalAborted, match="retry-after 7200s.*daily quota"):
         run_eval(ses, "u1", LLMScorer(router, NoWait(), a, BANDS), max_consecutive_failures=2)
+
+
+def test_cli_eval_exclude_default_from_config_and_none_override(ses, tmp_path, monkeypatch):
+    import json as _j
+    from unittest import mock
+
+    from cortex.agents.scorer import FakeProvider
+    add(ses, 1, 72, "P2", status="applied", stack_fit="Azure-bullseye")
+    monkeypatch.setenv("CORTEX_DB_URL", f"sqlite:///{tmp_path}/t.db")
+    monkeypatch.setenv("CORTEX_USER_ID", "u1")
+    seen = []
+    for flag in ([], ["--exclude-fields", "none"]):
+        fake = FakeProvider([_j.dumps({"score": 80, "reasons": ["x"]})])
+        fake.name = "groq"
+        with mock.patch("cortex.llm.router.build_route", return_value=fake):
+            main(["eval", "--provider", "groq", *flag])
+        seen.append(fake.prompts[0])
+    assert "Azure-bullseye" not in seen[0]           # config default drops stack_fit
+    assert "Azure-bullseye" in seen[1]               # 'none' puts it back
