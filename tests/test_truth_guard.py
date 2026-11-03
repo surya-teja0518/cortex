@@ -264,3 +264,52 @@ def test_tailor_exception_counts_as_failure_and_no_message_logged(tmp_path):
     out, _, _, audit = run([err, err, err], tmp_path)
     assert out.status == "rejected" and out.violations[0].kind == "tailor_error"
     assert "sk-SUPERSECRET" not in audit.path.read_text()
+
+
+# ---------- cover note ----------
+
+COVER = ["I'm applying for this Data Engineer role because it matches my streaming and Oracle work.",
+         "At Example Systems I administered 6 production Oracle databases feeding Kafka-based flows.",
+         "Earlier I migrated 120 tables to Snowflake with PySpark on Databricks. I'd welcome a conversation."]
+
+
+def test_cover_note_valid_passes():
+    assert check(good(cover_note=COVER)) == []
+
+
+def test_cover_note_invented_skill_and_metric():
+    bad = COVER[:2] + ["I also led Kubernetes migrations that cut costs by 70%."]
+    assert kinds(check(good(cover_note=bad))) == [("metric", "70%"), ("skill", "Kubernetes")]
+
+
+@pytest.mark.parametrize("text,claim", [
+    ("See my work at https://evil.example/cv", "https://"),
+    ("Or visit www.example.com for details", "www."),
+    ("Reach me at recruiter@evil.example any time", "recruiter@evil.example"),
+    ("Call +91 98765 43210 to discuss", "+91 98765 43210"),
+])
+def test_cover_note_links_and_contacts_rejected(text, claim):
+    vs = check(good(cover_note=[*COVER[:2], text]))
+    assert ("link", claim) in kinds(vs)
+
+
+def test_links_rejected_in_summary_and_bullets_too():
+    r = role(0, bullets=["Ran 6 production Oracle databases; details at http://x.example"])
+    vs = check(good(summary="Data engineer, see www.me.example", roles=[r]))
+    assert sorted(v.where for v in vs if v.kind == "link") == ["roles[0] bullet 0", "summary"]
+
+
+def test_cover_note_length_limits():
+    from cortex.core.resume import COVER_NOTE_MAX_CHARS
+    with pytest.raises(ValidationError):
+        TailoredResume.model_validate(good(cover_note=["x"] * 5))                       # > 4 paragraphs
+    with pytest.raises(ValidationError):
+        TailoredResume.model_validate(good(cover_note=["y" * 700, "y" * 700, "y" * 300]))  # > total cap
+    assert COVER_NOTE_MAX_CHARS == 1600
+    TailoredResume.model_validate(good(cover_note=[]))                                  # optional
+
+
+def test_tailor_prompt_asks_for_cover_note_and_forbids_links():
+    from cortex.agents.tailor import TAILOR_PROMPT
+    assert "cover_note" in TAILOR_PROMPT and "Never include links" in TAILOR_PROMPT
+    assert "ignore it" in TAILOR_PROMPT

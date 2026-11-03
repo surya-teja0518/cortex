@@ -44,7 +44,11 @@ _NUM = re.compile(
     re.IGNORECASE)
 
 Kind = Literal["skill", "employer", "client", "title", "date", "project", "metric", "certification",
-               "schema", "tailor_error"]
+               "link", "schema", "tailor_error"]
+
+# Links, emails and phone numbers never belong in tailored text: a hostile job posting could try to get
+# the model to plant a phishing link or someone else's contact details in Surya's cover note.
+_LINKISH = re.compile(r"https?://|www\.|[\w.+-]+@[\w-]+\.[\w.]+|(?<!\d)\+?\d[\d\s-]{8,}\d(?!\d)", re.IGNORECASE)
 
 
 class Violation(BaseModel):
@@ -182,6 +186,16 @@ class TruthGuard:
             skills, tokens = self._project_scope(proj)
             for j, b in enumerate(tp.bullets):
                 v += self._check_text(b, f"{where} bullet {j}", skills, tokens)
+
+        # Cover note: free text with no role structure, so it's checked at the widest scope (any master
+        # skill, any master number). Narrower than a human reviewer, broader than a role bullet: see docs.
+        for i, para in enumerate(t.cover_note):
+            v += self._check_text(para, f"cover_note[{i}]", all_skills, self._all_tokens)
+        for where, text in [("summary", t.summary), *((f"cover_note[{i}]", p) for i, p in enumerate(t.cover_note)),
+                            *((f"roles[{i}] bullet {j}", b) for i, r in enumerate(t.roles) for j, b in enumerate(r.bullets))]:
+            for m in _LINKISH.finditer(text):
+                v.append(Violation(kind="link", claim=m.group(0)[:40], where=where,
+                                   reason="links, emails and phone numbers are not allowed in tailored text"))
 
         certs = {norm(x) for c in self.m.certifications for x in (c.name, c.code) if x}
         for c in t.certifications:
