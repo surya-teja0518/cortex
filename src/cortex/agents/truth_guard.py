@@ -152,6 +152,11 @@ class TruthGuard:
         for s in t.skills:
             if norm(s) not in self._skill_canon:
                 v.append(Violation(kind="skill", claim=s, where="skills", reason="not in master skills"))
+        for g in t.skill_groups:
+            for s in g.skills:
+                if norm(s) not in self._skill_canon:
+                    v.append(Violation(kind="skill", claim=s, where=f"skill_groups[{g.label}]",
+                                       reason="not in master skills"))
         v += self._check_text(t.summary, "summary", all_skills, self._all_tokens)
 
         for i, tr in enumerate(t.roles):

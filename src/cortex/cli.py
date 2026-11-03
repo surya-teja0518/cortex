@@ -87,6 +87,7 @@ def cmd_eval(a, uid):
 def cmd_tailor(a, uid):
     """Start one tailoring run. It pauses at the approval gate; approve or reject in the dashboard."""
     from cortex.agents.tailor import Tailor
+    from cortex.agents.track_tailor import TrackError, TrackTailor
     from cortex.agents.truth_guard import TruthGuard
     from cortex.core.ratelimit import NoLimit
     from cortex.core.resume import TailoredResume, load_master
@@ -94,12 +95,24 @@ def cmd_tailor(a, uid):
     from cortex.llm.router import build_route
 
     cfg, master, audit, ses = load_config(a.config), load_master(a.master), AuditLog(), _session()
-    router = build_route("tailor", cfg, audit, schema=TailoredResume.model_json_schema(), only=a.provider)
-    tailor = Tailor(router, master, NoLimit(), audit)   # the router rate-limits per provider
+    tcfg = cfg.get("tailor", {})
+    mode = a.mode or tcfg.get("mode", "track")
+    router = None
+    if mode == "track":
+        try:
+            tailor = TrackTailor(master, tcfg.get("track_map"), tcfg.get("default_track", "data_engineer"),
+                                 override=a.track)
+        except TrackError as e:
+            raise SystemExit(f"track mode: {e}. Add tracks, or run with --mode llm") from None
+    else:
+        router = build_route("tailor", cfg, audit, schema=TailoredResume.model_json_schema(), only=a.provider)
+        tailor = Tailor(router, master, NoLimit(), audit,   # the router rate-limits per provider
+                        cover_note=tcfg.get("cover_note", False))
     app = build_graph(Deps(session_factory=lambda: ses, audit=audit, guard=TruthGuard(master), tailor=tailor),
                       open_checkpointer())
     st = start_tailoring(app, ses, uid, a.job_id)
-    print(f"job {a.job_id}: {st['status']} (attempts={st.get('attempts', 0)}, model={router.served_by or '-'})")
+    used = (st.get("resume") or {}).get("based_on") or (router.served_by if router else None) or "-"
+    print(f"job {a.job_id}: {st['status']} (attempts={st.get('attempts', 0)}, based on {used})")
     for v in st.get("violations") or []:
         print(f"   {v}")
     if st["status"] == "pending_approval":
@@ -190,7 +203,10 @@ def main(argv=None):
     e.set_defaults(fn=cmd_eval)
     t = sub.add_parser("tailor", help="tailor a resume for one job; pauses for approval in the dashboard")
     t.add_argument("job_id", type=int)
-    t.add_argument("--provider", default=None, help="pin one provider (must be local: the route refuses others)")
+    t.add_argument("--mode", choices=["track", "llm"], default=None,
+                   help="track (default): pick one of your curated resumes and reorder bullets; llm: rewrite with Ollama")
+    t.add_argument("--track", default=None, help="force a track, e.g. oracle_dba (default: from the job's track)")
+    t.add_argument("--provider", default=None, help="llm mode: pin one provider (must be local)")
     t.add_argument("--master", default="master_resume.yaml")
     t.set_defaults(fn=cmd_tailor)
     k = sub.add_parser("packet", help="build/retry the PDF packet for an approved job")

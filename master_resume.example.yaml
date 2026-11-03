@@ -55,3 +55,51 @@ certifications:
 
 education:
   - {institution: Example Institute of Technology, degree: B.Tech Computer Science, start: "2017-08", end: "2021-05"}
+
+# Curated resumes ("tracks"), stored verbatim. The track tailor picks one per job (data / database / ai)
+# and only reorders bullets by relevance; it never rewrites. Every claim must still pass Truth Guard.
+tracks:
+  data_engineer:
+    label: Data Engineer
+    summary: Data engineer with 4+ years building batch and streaming pipelines on Azure and Oracle.
+    skill_groups:
+      - {label: Languages, skills: [Python, SQL]}
+      - {label: Data Platforms, skills: [PySpark, Azure Databricks, Azure Data Factory, Snowflake]}
+      - {label: Orchestration & Streaming, skills: [Airflow, Kafka]}
+    roles:
+      - employer: Example Systems
+        client: Example Bank
+        title: Data Engineer
+        start: "2024-07"
+        end: present
+        bullets:
+          - Administered 6 production Oracle databases feeding Kafka-based streaming flows.
+          - Built a Flask + Docker KPI dashboard for database health.
+      - employer: Sample Consulting
+        client: Sample Health
+        title: Associate Data Engineer
+        start: "2021-06"
+        end: "2024-06"
+        bullets:
+          - Built PySpark pipelines on Azure Databricks orchestrated by ADF.
+          - Migrated 120 tables to Snowflake, cutting nightly load time by 35%.
+    projects:
+      - name: DB KPI Automation
+        bullets: [Automated collection of 40 database KPIs into a single dashboard.]
+    certifications: [DP-203]
+  oracle_dba:
+    label: Oracle DBA
+    summary: Oracle DBA and data engineer with 4+ years on production Oracle databases.
+    skill_groups:
+      - {label: Databases, skills: [Oracle, SQL]}
+      - {label: Tooling, skills: [Python, Docker, Flask]}
+    roles:
+      - employer: Example Systems
+        client: Example Bank
+        title: Data Engineer
+        start: "2024-07"
+        end: present
+        bullets:
+          - Built a Flask + Docker KPI dashboard for database health.
+          - Administered 6 production Oracle databases feeding Kafka-based streaming flows.
+    certifications: [DP-203]

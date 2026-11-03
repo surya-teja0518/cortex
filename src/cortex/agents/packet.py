@@ -181,7 +181,10 @@ class PacketBuilder:
         parts = [x for x in (c.location, c.email, c.phone, c.linkedin, c.github) if x]
         story = [Paragraph(_e(c.name), name), Paragraph(_e("  |  ".join(parts)), contact), Spacer(1, 4)]
         story += section("Summary") + [Paragraph(_e(r.summary), base)]
-        if r.skills:
+        if r.skill_groups:   # grouped, as on Surya's own resumes
+            story += section("Technical Skills") + [
+                Paragraph(f"<b>{_e(g.label)}:</b> {_e(', '.join(g.skills))}", base) for g in r.skill_groups]
+        elif r.skills:
             story += section("Skills") + [Paragraph(_e(", ".join(r.skills)), base)]
         if r.roles:
             story += section("Experience")

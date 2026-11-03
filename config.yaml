@@ -36,3 +36,11 @@ llm:
   # Fields left out of the scorer prompt. stack_fit is SYNAPSE's own fit verdict; the 2026-11-02 ablation
   # showed the LLM ranks no worse without it (62.4 vs 60.8 mean pct rank), so CORTEX doesn't depend on it.
   scorer_exclude_fields: [stack_fit]
+
+# Tailoring. track (default): pick one of the curated resumes in master_resume.yaml `tracks:` by the job's
+# track and put the most relevant bullets first; no LLM, nothing rewritten. llm: the Ollama rewrite tailor.
+tailor:
+  mode: track
+  track_map: {data: data_engineer, database: oracle_dba, ai: ai_ml}
+  default_track: data_engineer
+  cover_note: false          # llm mode only; Surya doesn't send cover letters
