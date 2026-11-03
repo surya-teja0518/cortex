@@ -82,6 +82,37 @@ class Education(_Strict):
     end: YearMonth
 
 
+class SkillGroup(_Strict):
+    """One line of a resume's skills section, e.g. 'Languages: Python, SQL, PL/SQL'."""
+    label: Text
+    skills: list[Text] = Field(min_length=1)
+
+
+class TrackRole(_Strict):
+    employer: Text
+    client: Text | None = None
+    title: Text
+    start: YearMonth
+    end: EndDate
+    bullets: list[Text] = Field(default_factory=list)
+
+
+class TrackProject(_Strict):
+    name: Text
+    bullets: list[Text] = Field(default_factory=list)
+
+
+class TrackResume(_Strict):
+    """One of Surya's curated resumes (Data Engineer / Oracle DBA / AI-ML), stored verbatim.
+    The track tailor selects one per job and only reorders bullets; it never rewrites text."""
+    label: Text
+    summary: Text
+    skill_groups: list[SkillGroup] = Field(min_length=1)
+    roles: list[TrackRole] = Field(min_length=1)
+    projects: list[TrackProject] = Field(default_factory=list)
+    certifications: list[Text] = Field(default_factory=list)
+
+
 class MasterResume(_Strict):
     version: int = 1
     summary: Text
@@ -90,6 +121,7 @@ class MasterResume(_Strict):
     projects: list[Project] = Field(default_factory=list)
     certifications: list[Certification] = Field(default_factory=list)
     education: list[Education] = Field(default_factory=list)
+    tracks: dict[str, TrackResume] = Field(default_factory=dict)   # e.g. data_engineer, oracle_dba, ai_ml
 
     @model_validator(mode="before")
     @classmethod
@@ -145,6 +177,8 @@ COVER_NOTE_MAX_CHARS = 1600   # ~250 words: long free text is where models start
 class TailoredResume(_Strict):
     summary: Text
     skills: list[Text]
+    skill_groups: list[SkillGroup] = Field(default_factory=list)   # grouped skills section (track mode)
+    based_on: str | None = Field(default=None, max_length=60)      # e.g. "track:oracle_dba" or "llm"
     roles: list[TailoredRole]
     projects: list[TailoredProject] = Field(default_factory=list)
     certifications: list[Text] = Field(default_factory=list)

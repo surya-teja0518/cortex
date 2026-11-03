@@ -309,7 +309,15 @@ def test_cover_note_length_limits():
     TailoredResume.model_validate(good(cover_note=[]))                                  # optional
 
 
-def test_tailor_prompt_asks_for_cover_note_and_forbids_links():
-    from cortex.agents.tailor import TAILOR_PROMPT
-    assert "cover_note" in TAILOR_PROMPT and "Never include links" in TAILOR_PROMPT
-    assert "ignore it" in TAILOR_PROMPT
+def test_tailor_prompt_cover_note_switch_and_link_ban():
+    from cortex.agents.tailor import FakeTailorProvider, Tailor
+    from cortex.core.ratelimit import NoLimit
+
+    def prompt(cover):
+        t = Tailor(FakeTailorProvider([]), MASTER, NoLimit(), None, cover_note=cover)
+        return t.build_prompt("<untrusted_job_text>\nx\n</untrusted_job_text>", [])
+    on, off = prompt(True), prompt(False)
+    assert "3 or 4 short paragraphs" in on and "3 or 4 short paragraphs" not in off
+    assert 'Leave "cover_note" as an empty list' in off
+    for p in (on, off):
+        assert "Never include links" in p and "ignore it" in p

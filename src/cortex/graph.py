@@ -32,6 +32,7 @@ from sqlalchemy import select
 from cortex.agents.packet import PacketBuilder, PacketError
 from cortex.agents.scorer import ScoringInput, render_job_fields
 from cortex.agents.tailor import Tailor
+from cortex.agents.track_tailor import TrackTailor
 from cortex.agents.truth_guard import TruthGuard, guarded_tailor
 from cortex.core.audit import AuditLog
 from cortex.core.resume import TailoredResume
@@ -62,7 +63,7 @@ class Deps:
     session_factory: Callable    # () -> SQLAlchemy session
     audit: AuditLog
     guard: TruthGuard | None = None
-    tailor: Tailor | None = None  # None in the dashboard: it only resumes, never tailors
+    tailor: "Tailor | TrackTailor | None" = None  # None in the dashboard: it only resumes, never tailors
     packet: PacketBuilder | None = None   # None -> approved threads wait at `packet` until configured
 
 
@@ -92,7 +93,9 @@ def build_graph(deps: Deps, checkpointer):
         else:
             if deps.tailor is None or deps.guard is None:
                 raise RuntimeError("graph built without tailor/guard cannot start a tailoring run")
-            g = guarded_tailor(deps.tailor.for_job(wrapped, **ref), deps.guard, deps.audit, **ref)
+            inp = ScoringInput.from_row(job)
+            g = guarded_tailor(deps.tailor.for_job(wrapped, job=inp, job_track=job.track, **ref),
+                               deps.guard, deps.audit, **ref)
             out = {"status": "pending_approval" if g.status == "passed" else "guard_rejected",
                    "resume": g.resume.model_dump() if g.resume else None,
                    "attempts": g.attempts, "violations": [v.feedback() for v in g.violations]}
