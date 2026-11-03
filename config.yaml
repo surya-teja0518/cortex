@@ -33,3 +33,6 @@ llm:
     scorer: [groq, gemini, ollama_small]   # public job text: cloud first, local fallback
     tailor: [ollama_8b]                    # Surya's resume: local only
   personal_data_routes: [tailor]           # enforced in code: these routes refuse non-local providers
+  # Fields left out of the scorer prompt. stack_fit is SYNAPSE's own fit verdict; the 2026-11-02 ablation
+  # showed the LLM ranks no worse without it (62.4 vs 60.8 mean pct rank), so CORTEX doesn't depend on it.
+  scorer_exclude_fields: [stack_fit]
