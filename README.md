@@ -41,6 +41,7 @@ Project context lives in `AGENTS.md` (single source of truth). `CLAUDE.md`, `GEM
 pip install -e ".[dev,ui]" && pytest
 cp .env.example .env
 cp contact.example.yaml contact.yaml          # resume PDF header (gitignored)
+cp answers.example.yaml answers.yaml          # your standard form answers (gitignored; edit them!)
 # export Google Sheets -> CSV (File > Download > CSV), put files in data/import/ (gitignored)
 cortex import data/import/<master>.csv data/import/<batch>.csv   # master first, then batches oldest -> newest
 cortex stats
@@ -62,6 +63,7 @@ Per-job LangGraph (tailor -> Truth Guard -> human approval `interrupt` -> record
 a crash resumes at the gate without re-running the LLM; approval only from the Streamlit dashboard.
 LLM router: per-agent fallback chains (scorer: Groq -> Gemini -> local Ollama; tailor: local Ollama only, enforced in code
 because the prompt carries the resume). Live provider calls are exercised on the developer's machine; CI uses mocked HTTP.
-Packet: approving in the dashboard builds `packets/.../resume.pdf`, `cover_note.pdf` + `job.md` (re-checked by Truth Guard; text
+Packet: approving in the dashboard builds `packets/.../resume.pdf`, `cover_note.pdf`, `workday.md` (every Workday field
+in page order, ready to paste; answers only from your own `answers.yaml`) + `job.md` (re-checked by Truth Guard; text
 escaped so LLM output can't inject PDF links). You still apply yourself.
 Not yet: cover note, real LLM eval numbers (pending runs on the developer machine), Apify adapter.

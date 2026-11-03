@@ -1,0 +1,19 @@
+# EXAMPLE ONLY. Copy to answers.yaml (gitignored) and write YOUR real answers.
+# CORTEX copies these into workday.md as-is. It never invents an answer: anything missing here
+# shows up as "answer manually" in the sheet. Leave a line out rather than guessing.
+how_did_you_hear: Company careers page
+current_location: Hyderabad, India
+willing_to_relocate: Yes, within India
+preferred_locations: Hyderabad, Bengaluru, Remote
+notice_period: 60 days
+earliest_start_date: Two months from offer
+total_experience: "4"
+current_ctc: Prefer to discuss
+expected_ctc: Prefer to discuss
+work_authorization: Yes (Indian citizen, for roles in India)
+requires_sponsorship: "No"
+gender: Prefer not to say
+veteran_status: Not applicable
+disability_status: Prefer not to say
+extra:
+  "Are you open to working in shifts?": "Yes, occasionally"

@@ -3,6 +3,7 @@
     packets/<user>/<job_id>-<company>-<title>/
         resume.pdf        tailored resume (contact header from contact.yaml, education/certs from the master)
         cover_note.pdf    cover note (if the tailor wrote one), same header; cover_note.txt for paste-in forms
+        workday.md        every Workday field in page order, ready to paste (see agents/workday.py)
         job.md            company, role, apply link, what to do next
 
 It never submits anything. Safety:
@@ -24,6 +25,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from cortex.agents.truth_guard import TruthGuard
+from cortex.agents.workday import StandardAnswers, render_sheet
 from cortex.core.resume import MasterResume, TailoredResume
 
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
@@ -82,12 +84,15 @@ class PacketResult:
     job_md: Path
     cover_pdf: Path | None = None
     cover_txt: Path | None = None
+    workday_md: Path | None = None
 
 
 class PacketBuilder:
-    def __init__(self, master: MasterResume, contact: ContactInfo, root: str | Path = "packets"):
+    def __init__(self, master: MasterResume, contact: ContactInfo, root: str | Path = "packets",
+                 answers: StandardAnswers | None = None):
         self.master = master
         self.contact = contact
+        self.answers = answers
         self.root = Path(root)
         self.guard = TruthGuard(master)
 
@@ -114,9 +119,11 @@ class PacketBuilder:
             cover_txt.write_text("\n\n".join(resume.cover_note) + "\n")
             cover_pdf = folder / "cover_note.pdf"
             self._render_cover(resume.cover_note, cover_pdf, company=company, title=title)
+        wd = folder / "workday.md"
+        wd.write_text(render_sheet(self.master, resume, self.contact, self.answers, company=company, title=title))
         md = folder / "job.md"
         md.write_text(self._job_md(company, title, location, url, has_cover=bool(resume.cover_note)))
-        return PacketResult(folder, pdf, md, cover_pdf, cover_txt)
+        return PacketResult(folder, pdf, md, cover_pdf, cover_txt, wd)
 
     # ---- rendering ----
     def _job_md(self, company: str, title: str, location: str, url: str | None, has_cover: bool = False) -> str:
@@ -127,6 +134,7 @@ class PacketBuilder:
                 + (f"- Apply: {link}\n" if link else "- Apply: (no valid http(s) link on record; find it manually)\n")
                 + "- Resume: resume.pdf (approved in the CORTEX dashboard)\n"
                 + ("- Cover note: cover_note.pdf (cover_note.txt for paste-in forms)\n" if has_cover else "")
+                + "- Workday: workday.md has every field in page order, ready to paste\n"
                 + "\n"
                   "CORTEX never submits applications. Open the link, attach resume.pdf, and apply yourself.\n")
 

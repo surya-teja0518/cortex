@@ -106,12 +106,15 @@ def cmd_tailor(a, uid):
         print("   open the dashboard to approve or reject")
 
 
-def packet_builder(master_path: str = "master_resume.yaml", contact_path: str = "contact.yaml"):
-    """PacketBuilder from the local master + contact files, or (None, reason) if either is missing/invalid."""
+def packet_builder(master_path: str = "master_resume.yaml", contact_path: str = "contact.yaml",
+                   answers_path: str = "answers.yaml"):
+    """PacketBuilder from the local master + contact (+ optional answers) files, or (None, reason)."""
     from cortex.agents.packet import PacketBuilder, PacketError, load_contact
+    from cortex.agents.workday import load_answers
     from cortex.core.resume import load_master
     try:
-        return PacketBuilder(load_master(master_path), load_contact(contact_path)), None
+        return PacketBuilder(load_master(master_path), load_contact(contact_path),
+                             answers=load_answers(answers_path)), None
     except (OSError, ValueError, PacketError) as e:
         return None, str(e)
 
