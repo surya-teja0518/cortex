@@ -1,8 +1,9 @@
 """Packet agent: turn an APPROVED tailored resume into files Surya can submit by hand.
 
     packets/<user>/<job_id>-<company>-<title>/
-        resume.pdf   tailored resume (contact header from contact.yaml, education/certs from the master)
-        job.md       company, role, apply link, what to do next
+        resume.pdf        tailored resume (contact header from contact.yaml, education/certs from the master)
+        cover_note.pdf    cover note (if the tailor wrote one), same header; cover_note.txt for paste-in forms
+        job.md            company, role, apply link, what to do next
 
 It never submits anything. Safety:
 - Runs only after the human approval gate (graph node after `record`, approved branch only).
@@ -79,6 +80,8 @@ class PacketResult:
     folder: Path
     resume_pdf: Path
     job_md: Path
+    cover_pdf: Path | None = None
+    cover_txt: Path | None = None
 
 
 class PacketBuilder:
@@ -105,18 +108,26 @@ class PacketBuilder:
         folder.mkdir(parents=True, exist_ok=True)
         pdf = folder / "resume.pdf"
         self._render_pdf(resume, pdf, company=company, title=title)
+        cover_pdf = cover_txt = None
+        if resume.cover_note:
+            cover_txt = folder / "cover_note.txt"
+            cover_txt.write_text("\n\n".join(resume.cover_note) + "\n")
+            cover_pdf = folder / "cover_note.pdf"
+            self._render_cover(resume.cover_note, cover_pdf, company=company, title=title)
         md = folder / "job.md"
-        md.write_text(self._job_md(company, title, location, url))
-        return PacketResult(folder, pdf, md)
+        md.write_text(self._job_md(company, title, location, url, has_cover=bool(resume.cover_note)))
+        return PacketResult(folder, pdf, md, cover_pdf, cover_txt)
 
     # ---- rendering ----
-    def _job_md(self, company: str, title: str, location: str, url: str | None) -> str:
+    def _job_md(self, company: str, title: str, location: str, url: str | None, has_cover: bool = False) -> str:
         link = safe_url(url)
         clean = " ".join(f"{company} | {title}".split())
         return (f"# {clean}\n\n"
                 + (f"- Location: {' '.join(location.split())}\n" if location else "")
                 + (f"- Apply: {link}\n" if link else "- Apply: (no valid http(s) link on record; find it manually)\n")
-                + "- Resume: resume.pdf (approved in the CORTEX dashboard)\n\n"
+                + "- Resume: resume.pdf (approved in the CORTEX dashboard)\n"
+                + ("- Cover note: cover_note.pdf (cover_note.txt for paste-in forms)\n" if has_cover else "")
+                + "\n"
                   "CORTEX never submits applications. Open the link, attach resume.pdf, and apply yourself.\n")
 
     def _render_pdf(self, r: TailoredResume, path: Path, *, company: str, title: str) -> None:
@@ -189,3 +200,22 @@ class PacketBuilder:
                                 topMargin=12 * mm, bottomMargin=12 * mm, title=f"{c.name} - {company} {title}"[:120],
                                 author=c.name, creator="CORTEX")
         doc.build(story)
+
+    def _render_cover(self, paragraphs: list[str], path: Path, *, company: str, title: str) -> None:
+        from reportlab.lib.enums import TA_CENTER
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import ParagraphStyle
+        from reportlab.lib.units import mm
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+
+        base = ParagraphStyle("base", fontName="Helvetica", fontSize=10.5, leading=15, spaceAfter=8)
+        name = ParagraphStyle("name", parent=base, fontName="Helvetica-Bold", fontSize=15, alignment=TA_CENTER)
+        contact = ParagraphStyle("contact", parent=base, fontSize=9, alignment=TA_CENTER)
+        c = self.contact
+        parts = [x for x in (c.location, c.email, c.phone, c.linkedin) if x]
+        story = [Paragraph(_e(c.name), name), Paragraph(_e("  |  ".join(parts)), contact), Spacer(1, 10)]
+        story += [Paragraph(_e(p), base) for p in paragraphs]
+        story += [Spacer(1, 6), Paragraph(_e(c.name), base)]
+        SimpleDocTemplate(str(path), pagesize=A4, leftMargin=22 * mm, rightMargin=22 * mm, topMargin=18 * mm,
+                          bottomMargin=18 * mm, title=f"{c.name} - cover note - {company} {title}"[:120],
+                          author=c.name, creator="CORTEX").build(story)

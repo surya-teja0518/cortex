@@ -101,12 +101,19 @@ def test_build_writes_pdf_and_job_md(tmp_path):
 
 
 def test_markup_in_llm_text_is_escaped_not_rendered(tmp_path):
+    # Markup with no URL, tech term or number gets past every Truth Guard rule, so only escaping stops it.
     evil = dict(GOOD, roles=[dict(GOOD["roles"][0], bullets=[
-        "Ran 6 production Oracle databases <a href='https://evil.example'>click</a> <font size=40>BIG</font>"])])
+        "Ran 6 production Oracle databases <a href='#jump'>click</a> <font color='red'>BIG</font>"])])
     res = builder(tmp_path).build(TailoredResume.model_validate(evil), user_id="u1", job_id=8, company="A", title="B")
     raw = res.resume_pdf.read_bytes()
-    assert b"/URI" not in raw                                  # no clickable link was created
-    assert "<a href='https://evil.example'>click</a>" in pdf_text(res.resume_pdf)   # shown as plain text
+    assert b"/URI" not in raw and b"/Link" not in raw            # no link annotation of any kind
+    assert "<a href='#jump'>click</a>" in pdf_text(res.resume_pdf)   # shown as plain text, not a link
+
+
+def test_real_urls_are_blocked_before_rendering(tmp_path):
+    evil = dict(GOOD, roles=[dict(GOOD["roles"][0], bullets=["Ran 6 databases, see https://evil.example"])])
+    with pytest.raises(PacketError, match="link"):
+        builder(tmp_path).build(TailoredResume.model_validate(evil), user_id="u1", job_id=8, company="A", title="B")
 
 
 def test_bad_apply_link_dropped(tmp_path):
@@ -181,3 +188,19 @@ def test_packet_failure_keeps_approval_and_resumes_later(env):
     assert Path(st["packet_path"], "resume.pdf").exists() and provider2.prompts == []
     assert len(provider.prompts) == 1                                    # tailoring never re-ran
     assert build_packet(app2, ses2, "u1", env["job"])["packet_path"] == st["packet_path"]   # idempotent
+
+
+def test_cover_note_written_and_escaped(tmp_path):
+    cover = ["Dear hiring team <b>at</b> Acme,", "At Example Systems I ran 6 production Oracle databases."]
+    res = builder(tmp_path).build(TailoredResume.model_validate(dict(GOOD, cover_note=cover)), user_id="u1",
+                                  job_id=5, company="Acme", title="DE")
+    assert res.cover_txt.read_text().startswith("Dear hiring team <b>at</b> Acme,")
+    text = pdf_text(res.cover_pdf)
+    assert "Alex Example" in text and "<b>at</b>" in text and "6 production Oracle databases" in text
+    assert "cover_note.pdf" in res.job_md.read_text()
+
+
+def test_no_cover_note_no_files(tmp_path):
+    res = builder(tmp_path).build(TailoredResume.model_validate(GOOD), user_id="u1", job_id=6, company="A", title="B")
+    assert res.cover_pdf is None and not (res.folder / "cover_note.pdf").exists()
+    assert "cover_note" not in res.job_md.read_text()

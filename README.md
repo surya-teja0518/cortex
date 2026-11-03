@@ -62,6 +62,6 @@ Per-job LangGraph (tailor -> Truth Guard -> human approval `interrupt` -> record
 a crash resumes at the gate without re-running the LLM; approval only from the Streamlit dashboard.
 LLM router: per-agent fallback chains (scorer: Groq -> Gemini -> local Ollama; tailor: local Ollama only, enforced in code
 because the prompt carries the resume). Live provider calls are exercised on the developer's machine; CI uses mocked HTTP.
-Packet: approving in the dashboard builds `packets/.../resume.pdf` + `job.md` (re-checked by Truth Guard; text
+Packet: approving in the dashboard builds `packets/.../resume.pdf`, `cover_note.pdf` + `job.md` (re-checked by Truth Guard; text
 escaped so LLM output can't inject PDF links). You still apply yourself.
 Not yet: cover note, real LLM eval numbers (pending runs on the developer machine), Apify adapter.

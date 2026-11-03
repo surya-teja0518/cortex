@@ -138,9 +138,21 @@ class TailoredProject(_Strict):
     bullets: list[Text] = Field(default_factory=list)
 
 
+CoverParagraph = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=700)]
+COVER_NOTE_MAX_CHARS = 1600   # ~250 words: long free text is where models start inventing
+
+
 class TailoredResume(_Strict):
     summary: Text
     skills: list[Text]
     roles: list[TailoredRole]
     projects: list[TailoredProject] = Field(default_factory=list)
     certifications: list[Text] = Field(default_factory=list)
+    cover_note: list[CoverParagraph] = Field(default_factory=list, max_length=4)   # paragraphs; optional
+
+    @model_validator(mode="after")
+    def _cover_note_short(self):
+        total = sum(len(p) for p in self.cover_note)
+        if total > COVER_NOTE_MAX_CHARS:
+            raise ValueError(f"cover_note is {total} chars; keep it under {COVER_NOTE_MAX_CHARS}")
+        return self
