@@ -87,3 +87,59 @@ for p in pending:
 
 if st.session_state.get("packet_msg"):
     st.info(st.session_state.pop("packet_msg"))
+
+
+# ---- Tracker: what happened after you applied (you report it; CORTEX never contacts anyone) ----
+from datetime import date
+
+from cortex.agents.tracker import (
+    TRANSITIONS,
+    TrackerError,
+    followups,
+    report,
+    update_status,
+)
+from cortex.core.config import load_config
+from cortex.review import applications, ready_to_apply
+
+st.header("Applications")
+ready = ready_to_apply(session, uid)
+if ready:
+    st.subheader("Approved: apply, then mark it here")
+for r in ready:
+    c1, c2, c3 = st.columns([5, 2, 2])
+    c1.write(f"**{r['company']}** | {r['role']}" + (f"  \n`{r['packet']}`" if r["packet"] else ""))
+    if r["url"]:
+        c2.link_button("Open posting", r["url"])
+    if c3.button("I applied", key=f"applied-{r['job_id']}"):
+        update_status(session, uid, r["job_id"], "applied", audit=AuditLog())
+        st.rerun()
+
+_days = load_config().get("tracker", {}).get("followup_days", 7)
+_fups = followups(session, uid, date.today(), _days)  # noqa: DTZ011 (local date)
+if _fups:
+    st.subheader(f"Follow-ups due ({len(_fups)}): no update for {_days}+ days")
+    st.dataframe(_fups, use_container_width=True, hide_index=True,
+                 column_config={"url": st.column_config.LinkColumn("job link")})
+
+apps = applications(session, uid)
+_rep = report(session, uid, date.today())  # noqa: DTZ011 (local date)
+st.caption(f"{_rep.applied_total} applications, response rate "
+           + (f"{_rep.response_rate:.0%}" if _rep.response_rate is not None else "n/a")
+           + " (interview or offer / applied)")
+if apps:
+    with st.expander(f"Update a status ({len(apps)} applications)"):
+        st.dataframe(apps, use_container_width=True, hide_index=True,
+                     column_config={"url": st.column_config.LinkColumn("job link")})
+        movable = [a for a in apps if TRANSITIONS.get(a["status"])]
+        if movable:
+            pick = st.selectbox("Application", movable, format_func=lambda a: f"[{a['job_id']}] {a['company']} | "
+                                f"{a['role']} ({a['status']})")
+            new = st.selectbox("New status", sorted(TRANSITIONS[pick["status"]]))
+            tnote = st.text_input("Note (optional)", max_chars=300, key="tracker-note")
+            if st.button("Record"):
+                try:
+                    update_status(session, uid, pick["job_id"], new, note=tnote or None, audit=AuditLog())
+                    st.rerun()
+                except TrackerError as e:
+                    st.error(str(e))

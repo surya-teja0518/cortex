@@ -118,6 +118,17 @@ class TailoredResumeRow(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
+class ApplicationEventRow(Base):
+    """Append-only history of what happened to an application (tracker agent). New table: no migration."""
+    __tablename__ = "application_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    job_id: Mapped[int] = mapped_column(Integer, index=True)
+    status: Mapped[str] = mapped_column(String(24))
+    note: Mapped[str | None] = mapped_column(String(300))
+    at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
 class PacketRow(Base):
     """Where the packet for an approved run was written (resume.pdf + job.md). New table, so existing
     databases pick it up via create_all without a migration."""
