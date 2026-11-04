@@ -3,6 +3,7 @@ import json
 
 from sqlalchemy import select
 
+from cortex.agents.tracker import FUNNEL
 from cortex.core.audit import AuditLog
 from cortex.db.schema import JobRow, SkipRow, TailoredResumeRow
 
@@ -80,7 +81,7 @@ def ready_to_apply(session, user_id: str) -> list[dict]:
 def applications(session, user_id: str) -> list[dict]:
     """Everything in the funnel (applied and beyond), newest application first."""
     q = (select(JobRow).where(JobRow.user_id == user_id, JobRow.dup_of_id.is_(None),
-                              JobRow.status.in_(("applied", "interview", "offer", "rejected")))
+                              JobRow.status.in_(FUNNEL))
          .order_by(JobRow.applied_date.desc().nulls_last()))
     return [dict(job_id=j.id, company=j.company, role=j.title, status=j.status, applied=j.applied_date, url=j.url)
             for j in session.scalars(q)]

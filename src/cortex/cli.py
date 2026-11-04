@@ -23,6 +23,28 @@ def cmd_import(a, uid):
           f"gated={s.gated} flagged={s.flagged} possible_dups={s.duplicates}")
 
 
+def cmd_fetch(a, uid):
+    """Pull postings from the public ATS boards in config.yaml (sources.ats.boards)."""
+    from cortex.sources.ats import fetch_all
+    cfg = load_config(a.config)
+    if not (cfg.get("sources") or {}).get("ats", {}).get("boards"):
+        raise SystemExit("no boards configured: add them under sources.ats.boards in config.yaml")
+    res = fetch_all(_session(), cfg, uid, audit=AuditLog(), only=a.board, dry_run=a.dry_run)
+    if a.board and not res:
+        raise SystemExit(f"{a.board!r} is not in sources.ats.boards (format ats:board, e.g. greenhouse:databricks)")
+    for r in res:
+        head = f"{r.ats}:{r.board} ({r.company})"
+        if r.error:
+            print(f"{head}: ERROR {r.error}")
+            continue
+        print(f"{head}: fetched={r.fetched} relevant={r.kept} new={r.inserted} updated={r.updated} "
+              f"gated={r.gated} flagged={r.flagged}")
+        for t, loc, band in r.new_jobs[:10]:
+            print(f"    + [{band}] {t} | {loc}")
+    total = sum(r.inserted for r in res)
+    print(f"{total} new jobs" + (" (dry run: nothing saved)" if a.dry_run else "; review them in the dashboard"))
+
+
 def cmd_stats(a, uid):
     ses = _session()
     for label, col in (("status", JobRow.status), ("track", JobRow.track), ("cortex band", JobRow.band)):
@@ -166,8 +188,33 @@ def cmd_report(a, uid):
 
     from cortex.agents.tracker import followups, format_report, report
     ses, today = _session(), date.today()  # noqa: DTZ011 (the user's local date is what's meant)
-    days = load_config(a.config).get("tracker", {}).get("followup_days", 7)
-    print(format_report(report(ses, uid, today), followups(ses, uid, today, days)))
+    tcfg = load_config(a.config).get("tracker", {})
+    fups = followups(ses, uid, today, tcfg.get("followup_days", 7), tcfg.get("stale_days", 30))
+    print(format_report(report(ses, uid, today), fups))
+
+
+def cmd_undo(a, uid):
+    """Revert the last status change CORTEX recorded for a job (history keeps an 'undo' event)."""
+    from cortex.agents.tracker import TrackerError, undo
+    ses = _session()
+    try:
+        job = undo(ses, uid, a.job_id, note=a.note, audit=AuditLog())
+    except TrackerError as e:
+        raise SystemExit(f"not undone: {e}") from None
+    print(f"job {a.job_id}: {job.company} | {job.title} -> back to {job.status}")
+
+
+def cmd_close_stale(a, uid):
+    """Mark applications with no reply for N days as no_response. Dry run unless --yes."""
+    from datetime import date
+
+    from cortex.agents.tracker import close_stale
+    days = a.days or load_config(a.config).get("tracker", {}).get("stale_days", 30)
+    rows = close_stale(_session(), uid, date.today(), days, dry_run=not a.yes, audit=AuditLog())  # noqa: DTZ011
+    for r in rows:
+        print(f"  {r['days_quiet']:>3}d quiet  [{r['job_id']}] {r['company']} | {r['role']}")
+    print(f"{len(rows)} applications quiet for {days}+ days: "
+          + ("marked no_response" if a.yes else "dry run, nothing changed (add --yes to mark them no_response)"))
 
 
 def cmd_llm_check(a, uid):
@@ -217,6 +264,10 @@ def main(argv=None):
     i = sub.add_parser("import", help="import SYNAPSE tracker CSV exports (master first, then batches)")
     i.add_argument("files", nargs="+")
     i.set_defaults(fn=cmd_import)
+    f = sub.add_parser("fetch", help="pull postings from public ATS boards (Greenhouse/Lever/Ashby) in config.yaml")
+    f.add_argument("--board", default=None, help="only this board, e.g. greenhouse:databricks")
+    f.add_argument("--dry-run", action="store_true", help="fetch and show what would be added; save nothing")
+    f.set_defaults(fn=cmd_fetch)
     sub.add_parser("stats").set_defaults(fn=cmd_stats)
     sub.add_parser("compare").set_defaults(fn=cmd_compare)
     e = sub.add_parser("eval", help="deterministic vs LLM scorer against applied/interview/offer labels")
@@ -239,14 +290,22 @@ def main(argv=None):
     k.add_argument("--master", default="master_resume.yaml")
     k.add_argument("--contact", default="contact.yaml")
     k.set_defaults(fn=cmd_packet)
-    for status in ("applied", "interview", "offer", "rejected"):
-        s = sub.add_parser(status, help=f"record: job is now {status}")
+    for status in ("applied", "interview", "offer", "rejected", "no_response"):
+        s = sub.add_parser(status.replace("_", "-"), help=f"record: job is now {status}")
         s.add_argument("job_id", type=int)
         s.add_argument("--note", default=None)
         if status == "applied":
             s.add_argument("--date", default=None, help="YYYY-MM-DD (default: today)")
         s.set_defaults(fn=cmd_track, status=status, date=None)
     sub.add_parser("report", help="applications, response rate, follow-ups due").set_defaults(fn=cmd_report)
+    u = sub.add_parser("undo", help="revert the last status change recorded for a job (e.g. 'applied' by mistake)")
+    u.add_argument("job_id", type=int)
+    u.add_argument("--note", default=None)
+    u.set_defaults(fn=cmd_undo)
+    c = sub.add_parser("close-stale", help="mark applications with no reply for N days as no_response (dry run)")
+    c.add_argument("--days", type=int, default=None, help="default: config tracker.stale_days (30)")
+    c.add_argument("--yes", action="store_true", help="actually change them (default: preview only)")
+    c.set_defaults(fn=cmd_close_stale)
     sub.add_parser("llm-check", help="ping every configured LLM provider").set_defaults(fn=cmd_llm_check)
     b = sub.add_parser("bench", help="benchmark local models on the real tailor task")
     b.add_argument("--providers", default="ollama_8b,ollama_granite", help="comma-separated provider names")

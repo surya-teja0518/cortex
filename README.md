@@ -44,13 +44,16 @@ cp contact.example.yaml contact.yaml          # resume PDF header (gitignored)
 cp answers.example.yaml answers.yaml          # your standard form answers (gitignored; edit them!)
 # export Google Sheets -> CSV (File > Download > CSV), put files in data/import/ (gitignored)
 cortex import data/import/<master>.csv data/import/<batch>.csv   # master first, then batches oldest -> newest
+cortex fetch --dry-run # public Greenhouse/Lever/Ashby boards from config.yaml (sources.ats.boards); drop --dry-run to save
 cortex stats
 cortex compare        # CORTEX deterministic score vs SYNAPSE Match
 cortex eval           # recall@P0-P1, mean percentile rank; precision + AUC once there are >= 10 negatives
 cortex tailor <job_id> # pick the right curated resume, reorder bullets for the job -> Truth Guard -> approval gate
 cortex packet <job_id> # PDF resume + job.md for an approved job (also built automatically on approval)
-cortex applied <job_id> # after you apply (also: interview / offer / rejected); history is kept
+cortex applied <job_id> # after you apply (also: interview / offer / rejected / no-response); history is kept
 cortex report         # applications, response rate, per week, follow-ups due
+cortex undo <job_id>  # revert the last status change (e.g. "applied" recorded by mistake); history keeps the correction
+cortex close-stale    # preview applications with no reply for 30+ days; --yes marks them no_response
 cortex llm-check      # ping Groq / Gemini / local Ollama models from config.yaml
 cortex bench          # local models on the real tailor task: Truth Guard pass rate + seconds per job
 streamlit run src/cortex/ui/app.py --server.address 127.0.0.1
@@ -68,4 +71,9 @@ because the prompt carries the resume). Live provider calls are exercised on the
 Packet: approving in the dashboard builds `packets/.../resume.pdf`, `cover_note.pdf`, `workday.md` (every Workday field
 in page order, ready to paste; answers only from your own `answers.yaml`) + `job.md` (re-checked by Truth Guard; text
 escaped so LLM output can't inject PDF links). You still apply yourself.
+ATS source: `cortex fetch` reads companies' public Greenhouse / Lever / Ashby job-board JSON (no login, no key),
+keeps postings matching title + India-location filters, then runs the same sanitizer (injection-flagged jobs go to
+manual review), gates, deterministic score and cross-source dedupe. Slugs are validated, redirects are not followed,
+responses are size-capped, and a re-fetch never changes a job's status. Parsers are tested against fixtures built
+from the vendors' documented shapes; live responses are checked with `cortex fetch --dry-run` on the developer's machine.
 Not yet: cover note, real LLM eval numbers (pending runs on the developer machine), Apify adapter.
