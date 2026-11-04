@@ -81,7 +81,8 @@ TRACK MODE (branch feat/track-resumes), now the DEFAULT tailor (config `tailor.m
 - `agents/track_tailor.py`: picks the track from the job's track (config `tailor.track_map`, `--track` override), keeps all text verbatim, and stable-sorts bullets by relevance (job tech terms x3 + title words). Job text is only compared, never copied in. Output still goes through Truth Guard (all 3 real tracks pass with 0 violations). Instant, no LLM.
 - PDF renders grouped "Technical Skills" lines. LLM tailor kept as `--mode llm`; its cover note is off by default (`tailor.cover_note: false`).
 - Known typos copied verbatim from Surya's DBA PDF (pending his OK to fix): "8 databases,10+" (missing space) and "8 production Oracle databases PNC's" (missing "on").
-NOT built yet: Workday fill helper (undecided), Apify adapter, tracker agent, scheduler, email digest.
+TRACKER (branch feat/tracker): `agents/tracker.py`, the last pipeline step. Records only what Surya reports (applied / interview / offer / rejected); forward-only TRANSITIONS; append-only `application_events` table (new table, no migration) + audit log; jobs.status/applied_date stay the current view, so every update is a new eval label. Follow-ups = applied/interview with no update for `tracker.followup_days` (7); imported sheet rows fall back to applied_date. Report: by status, response rate (interview or offer / applied, interviewed-then-rejected counts), applications per week. CLI `cortex applied|interview|offer|rejected <job_id> [--note] [--date]`, `cortex report`. Dashboard "Applications": approved jobs with "I applied", follow-ups due, status updates.
+NOT built yet: Workday fill helper (undecided), Apify adapter, scheduler, email digest.
 
 ## Build order (each step must be usable on its own)
 1. **MVP (DONE, v0.2):** SYNAPSE import → dedupe → gates → deterministic score → Streamlit review list. Next for this step: import real Batch016 export, then the older batches (master first).

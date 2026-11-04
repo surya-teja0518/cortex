@@ -145,6 +145,31 @@ def cmd_packet(a, uid):
     print(f"job {a.job_id}: packet at {st['packet_path']}  (CORTEX never submits: apply yourself)")
 
 
+def cmd_track(a, uid):
+    """Record what happened: applied / interview / offer / rejected. Forward-only, audit-logged."""
+    from datetime import date
+
+    from cortex.agents.tracker import TrackerError, update_status
+    ses = _session()   # keep a reference: the job is printed after the update
+    try:
+        job = update_status(ses, uid, a.job_id, a.status, note=a.note,
+                            on=date.fromisoformat(a.date) if a.date else None, audit=AuditLog())
+    except (TrackerError, ValueError) as e:
+        raise SystemExit(f"not recorded: {e}") from None
+    print(f"job {a.job_id}: {job.company} | {job.title} -> {job.status}"
+          + (f" on {job.applied_date}" if a.status == "applied" else ""))
+
+
+def cmd_report(a, uid):
+    """Applications by status, response rate, applications per week, follow-ups due."""
+    from datetime import date
+
+    from cortex.agents.tracker import followups, format_report, report
+    ses, today = _session(), date.today()  # noqa: DTZ011 (the user's local date is what's meant)
+    days = load_config(a.config).get("tracker", {}).get("followup_days", 7)
+    print(format_report(report(ses, uid, today), followups(ses, uid, today, days)))
+
+
 def cmd_llm_check(a, uid):
     """Ping every configured provider with a tiny JSON prompt. Prints OK/latency or the (redacted) error."""
     import time
@@ -214,6 +239,14 @@ def main(argv=None):
     k.add_argument("--master", default="master_resume.yaml")
     k.add_argument("--contact", default="contact.yaml")
     k.set_defaults(fn=cmd_packet)
+    for status in ("applied", "interview", "offer", "rejected"):
+        s = sub.add_parser(status, help=f"record: job is now {status}")
+        s.add_argument("job_id", type=int)
+        s.add_argument("--note", default=None)
+        if status == "applied":
+            s.add_argument("--date", default=None, help="YYYY-MM-DD (default: today)")
+        s.set_defaults(fn=cmd_track, status=status, date=None)
+    sub.add_parser("report", help="applications, response rate, follow-ups due").set_defaults(fn=cmd_report)
     sub.add_parser("llm-check", help="ping every configured LLM provider").set_defaults(fn=cmd_llm_check)
     b = sub.add_parser("bench", help="benchmark local models on the real tailor task")
     b.add_argument("--providers", default="ollama_8b,ollama_granite", help="comma-separated provider names")

@@ -49,6 +49,8 @@ cortex compare        # CORTEX deterministic score vs SYNAPSE Match
 cortex eval           # recall@P0-P1, mean percentile rank; precision + AUC once there are >= 10 negatives
 cortex tailor <job_id> # pick the right curated resume, reorder bullets for the job -> Truth Guard -> approval gate
 cortex packet <job_id> # PDF resume + job.md for an approved job (also built automatically on approval)
+cortex applied <job_id> # after you apply (also: interview / offer / rejected); history is kept
+cortex report         # applications, response rate, per week, follow-ups due
 cortex llm-check      # ping Groq / Gemini / local Ollama models from config.yaml
 cortex bench          # local models on the real tailor task: Truth Guard pass rate + seconds per job
 streamlit run src/cortex/ui/app.py --server.address 127.0.0.1

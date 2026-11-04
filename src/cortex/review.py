@@ -62,3 +62,25 @@ def pending_approvals(session, user_id: str) -> list[dict]:
     return [dict(job_id=j.id, company=j.company, role=j.title, url=j.url, attempts=t.attempts,
                  created_at=t.created_at, resume=json.loads(t.resume_json or "null"))
             for t, j in session.execute(q)]
+
+
+def ready_to_apply(session, user_id: str) -> list[dict]:
+    """Approved in the gate (packet built), not yet marked applied."""
+    from cortex.db.schema import PacketRow
+    rows = session.scalars(select(JobRow).where(JobRow.user_id == user_id, JobRow.status == "approved")
+                           .order_by(JobRow.updated_at.desc()))
+    out = []
+    for j in rows:
+        pk = session.scalars(select(PacketRow.path).where(PacketRow.user_id == user_id, PacketRow.job_id == j.id)
+                             .order_by(PacketRow.id.desc())).first()
+        out.append(dict(job_id=j.id, company=j.company, role=j.title, url=j.url, packet=pk))
+    return out
+
+
+def applications(session, user_id: str) -> list[dict]:
+    """Everything in the funnel (applied and beyond), newest application first."""
+    q = (select(JobRow).where(JobRow.user_id == user_id, JobRow.dup_of_id.is_(None),
+                              JobRow.status.in_(("applied", "interview", "offer", "rejected")))
+         .order_by(JobRow.applied_date.desc().nulls_last()))
+    return [dict(job_id=j.id, company=j.company, role=j.title, status=j.status, applied=j.applied_date, url=j.url)
+            for j in session.scalars(q)]

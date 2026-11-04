@@ -44,3 +44,6 @@ tailor:
   track_map: {data: data_engineer, database: oracle_dba, ai: ai_ml}
   default_track: data_engineer
   cover_note: false          # llm mode only; Surya doesn't send cover letters
+
+tracker:
+  followup_days: 7           # flag applied/interview jobs with no update for this many days
