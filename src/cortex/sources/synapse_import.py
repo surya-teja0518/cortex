@@ -140,6 +140,15 @@ def import_files(paths: list[str | Path], session, cfg: dict, user_id: str,
                     setattr(existing, k, v)
                 sm.updated += 1
     session.flush()
+    sm.duplicates = refresh_dups(session, user_id)
+    session.commit()
+    if audit:
+        audit.log("importer", "synapse_import", files=[Path(p).name for p in paths], **sm.__dict__)
+    return sm
+
+
+def refresh_dups(session, user_id: str) -> int:
+    """Recompute dup_of_id across ALL of a user's jobs (every source); the oldest row stays canonical."""
     rows = session.scalars(select(JobRow).where(JobRow.user_id == user_id).order_by(JobRow.id)).all()
     for r in rows:
         r.dup_of_id = None
@@ -147,8 +156,4 @@ def import_files(paths: list[str | Path], session, cfg: dict, user_id: str,
     by_id = {r.id: r for r in rows}
     for dup_id, canon_id in mapping.items():
         by_id[dup_id].dup_of_id = canon_id
-    sm.duplicates = len(mapping)
-    session.commit()
-    if audit:
-        audit.log("importer", "synapse_import", files=[Path(p).name for p in paths], **sm.__dict__)
-    return sm
+    return len(mapping)

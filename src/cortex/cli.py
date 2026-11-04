@@ -23,6 +23,28 @@ def cmd_import(a, uid):
           f"gated={s.gated} flagged={s.flagged} possible_dups={s.duplicates}")
 
 
+def cmd_fetch(a, uid):
+    """Pull postings from the public ATS boards in config.yaml (sources.ats.boards)."""
+    from cortex.sources.ats import fetch_all
+    cfg = load_config(a.config)
+    if not (cfg.get("sources") or {}).get("ats", {}).get("boards"):
+        raise SystemExit("no boards configured: add them under sources.ats.boards in config.yaml")
+    res = fetch_all(_session(), cfg, uid, audit=AuditLog(), only=a.board, dry_run=a.dry_run)
+    if a.board and not res:
+        raise SystemExit(f"{a.board!r} is not in sources.ats.boards (format ats:board, e.g. greenhouse:databricks)")
+    for r in res:
+        head = f"{r.ats}:{r.board} ({r.company})"
+        if r.error:
+            print(f"{head}: ERROR {r.error}")
+            continue
+        print(f"{head}: fetched={r.fetched} relevant={r.kept} new={r.inserted} updated={r.updated} "
+              f"gated={r.gated} flagged={r.flagged}")
+        for t, loc, band in r.new_jobs[:10]:
+            print(f"    + [{band}] {t} | {loc}")
+    total = sum(r.inserted for r in res)
+    print(f"{total} new jobs" + (" (dry run: nothing saved)" if a.dry_run else "; review them in the dashboard"))
+
+
 def cmd_stats(a, uid):
     ses = _session()
     for label, col in (("status", JobRow.status), ("track", JobRow.track), ("cortex band", JobRow.band)):
@@ -242,6 +264,10 @@ def main(argv=None):
     i = sub.add_parser("import", help="import SYNAPSE tracker CSV exports (master first, then batches)")
     i.add_argument("files", nargs="+")
     i.set_defaults(fn=cmd_import)
+    f = sub.add_parser("fetch", help="pull postings from public ATS boards (Greenhouse/Lever/Ashby) in config.yaml")
+    f.add_argument("--board", default=None, help="only this board, e.g. greenhouse:databricks")
+    f.add_argument("--dry-run", action="store_true", help="fetch and show what would be added; save nothing")
+    f.set_defaults(fn=cmd_fetch)
     sub.add_parser("stats").set_defaults(fn=cmd_stats)
     sub.add_parser("compare").set_defaults(fn=cmd_compare)
     e = sub.add_parser("eval", help="deterministic vs LLM scorer against applied/interview/offer labels")

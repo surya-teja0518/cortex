@@ -88,6 +88,10 @@ TRACKER UNDO (branch feat/tracker-undo, 2026-11-04; Surya recorded job 225 as ap
 - Follow-ups are a window: quiet `followup_days`..`stale_days` (7..30). Older = close them, not nudge them.
 - History is ordered by event id (append order); `at` can be backdated.
 - Eval positives now = applied/interview/offer/rejected/no_response (he chose to apply; employer's outcome doesn't flip the label). Earlier numbers used applied/interview/offer: rerun eval after recording outcomes.
+ATS SOURCE (branch feat/ats-source, 2026-11-04): `sources/ats.py` + `cortex fetch [--board ats:slug] [--dry-run]`. Public Greenhouse (`boards-api.greenhouse.io/v1/boards/<b>/jobs?content=true`), Lever (`api.lever.co/v0/postings/<b>?mode=json`), Ashby (`api.ashbyhq.com/posting-api/job-board/<b>`). Boards + filters in config `sources.ats` (title_include/title_exclude/locations, word-boundary; India cities only, bare "Remote" is NOT kept). Why: 62 applications from LinkedIn/Naukri postings, 0 responses; company boards are earlier and less crowded.
+- Safety: slug regex before URL, 200 only, no redirects, 15MB cap, JSON only; per-board errors isolated; HTML stripped (link targets dropped), all text sanitized + injection-flagged; js:/non-http urls dropped; audit = counts/HTTP status only.
+- Upsert on (user, source=ats name, external_id=`<board>:<id>`); re-fetch updates descriptive fields only, NEVER status/applied_date/notes. description stored. Track from title (db/ai/data), stack only azure/snowflake_databricks/dba else verify, YOE from "N(-M)(+) years ... experience" in the JD (feeds the YOE gate). `refresh_dups` (moved out of synapse_import) runs across all sources; oldest row stays canonical.
+- NOT verified live: the cloud build env's network policy blocks the three hosts. Fixtures follow vendor docs. First real run = `cortex fetch --dry-run` on Surya's Mac; fix parsers if a shape differs. Board list starts empty (Surya picks companies; slugs from their careers URLs).
 NOT built yet: Workday fill helper (undecided), Apify adapter, scheduler, email digest.
 
 ## Build order (each step must be usable on its own)

@@ -16,6 +16,22 @@ scoring:
 
 rate_limits:   # requests per minute (LLM limits live per provider under llm.providers.*.rpm)
   apify: 10
+  ats: 30        # public ATS board APIs: one request per board
+
+# Public ATS boards (company career pages' own JSON APIs; no login, no key). `cortex fetch --dry-run` first.
+# board = the slug in the company's careers URL:
+#   job-boards.greenhouse.io/<board>   jobs.lever.co/<board>   jobs.ashbyhq.com/<board>
+# Slugs below are NOT verified: a wrong one just reports "HTTP 404 (board slug not found?)".
+sources:
+  ats:
+    boards: []
+    # - {ats: greenhouse, board: databricks, company: Databricks}
+    # - {ats: lever, board: <slug>, company: <Name>}
+    # - {ats: ashby, board: <slug>, company: <Name>}
+    filters:   # word-boundary, case-insensitive; a posting must match a title_include AND a location
+      title_include: [data, database, dba, sql, etl, analytics engineer, ml, machine learning, ai, mlops, platform engineer]
+      title_exclude: [lead, principal, staff, architect, manager, director, head, vp, intern, sales, marketing, scientist]
+      locations: [india, hyderabad, bengaluru, bangalore, pune, chennai, mumbai, gurgaon, gurugram, noida, delhi]
 
 # LLM providers and per-agent routes. Keys come from .env (GROQ_API_KEY, GEMINI_API_KEY); never put them here.
 # Model ids change: run `cortex llm-check` after editing. Ids below were picked from each account's own

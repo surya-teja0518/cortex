@@ -44,6 +44,7 @@ cp contact.example.yaml contact.yaml          # resume PDF header (gitignored)
 cp answers.example.yaml answers.yaml          # your standard form answers (gitignored; edit them!)
 # export Google Sheets -> CSV (File > Download > CSV), put files in data/import/ (gitignored)
 cortex import data/import/<master>.csv data/import/<batch>.csv   # master first, then batches oldest -> newest
+cortex fetch --dry-run # public Greenhouse/Lever/Ashby boards from config.yaml (sources.ats.boards); drop --dry-run to save
 cortex stats
 cortex compare        # CORTEX deterministic score vs SYNAPSE Match
 cortex eval           # recall@P0-P1, mean percentile rank; precision + AUC once there are >= 10 negatives
@@ -70,4 +71,9 @@ because the prompt carries the resume). Live provider calls are exercised on the
 Packet: approving in the dashboard builds `packets/.../resume.pdf`, `cover_note.pdf`, `workday.md` (every Workday field
 in page order, ready to paste; answers only from your own `answers.yaml`) + `job.md` (re-checked by Truth Guard; text
 escaped so LLM output can't inject PDF links). You still apply yourself.
+ATS source: `cortex fetch` reads companies' public Greenhouse / Lever / Ashby job-board JSON (no login, no key),
+keeps postings matching title + India-location filters, then runs the same sanitizer (injection-flagged jobs go to
+manual review), gates, deterministic score and cross-source dedupe. Slugs are validated, redirects are not followed,
+responses are size-capped, and a re-fetch never changes a job's status. Parsers are tested against fixtures built
+from the vendors' documented shapes; live responses are checked with `cortex fetch --dry-run` on the developer's machine.
 Not yet: cover note, real LLM eval numbers (pending runs on the developer machine), Apify adapter.
