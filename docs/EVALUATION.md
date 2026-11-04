@@ -65,6 +65,7 @@ to the 80% labelled base rate, so it remains not evidence.
 | Data | Personal job tracker (SYNAPSE master sheet + Batch 011), imported with `cortex import` |
 | Population | 362 jobs after de-duplication and deterministic gates (title blocklist, min-YOE cap 5) |
 | Positives | 60 jobs with status Applied / Interview / Offer (63 applied rows before dedupe/gates) |
+| Positives (from 2026-11-04) | Also `rejected` and `no_response`: the label is "I chose to apply", and that choice doesn't change when the employer says no or never replies. Before this, marking a job rejected silently removed it from the positives. The 2026-11-02/03 numbers above used Applied/Interview/Offer only; rerun `cortex eval` after recording outcomes and report the new count. |
 | Negatives | 15 jobs with status `exp_mismatch` (I looked and turned them down). `not_accepting`/`closed` are the employer's decision and left unlabelled. |
 | Baseline | Deterministic SYNAPSE rules (`core/scoring.py`): base per track plus stack/location/experience adjustments |
 | LLM | Groq `openai/gpt-oss-120b`, `reasoning_effort: low`, temperature 0, JSON mode |

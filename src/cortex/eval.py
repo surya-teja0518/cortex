@@ -22,7 +22,9 @@ from cortex.agents.scorer import LLMScorer, ScorerOutcome, ScoringInput, render_
 from cortex.core.models import ScoreResult
 from cortex.db.schema import JobRow, LLMScoreCacheRow, SkipRow
 
-POSITIVE_STATUSES = ("applied", "interview", "offer")
+# A positive is a job Surya CHOSE to apply to, whatever the employer did next: the scorer predicts his
+# choices, so rejected / no_response applications are still positives.
+POSITIVE_STATUSES = ("applied", "interview", "offer", "rejected", "no_response")
 NEGATIVE_STATUSES = ("exp_mismatch",)
 TOP_BANDS = ("P0", "P1")
 MIN_NEGATIVES = 10

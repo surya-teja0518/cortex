@@ -166,8 +166,33 @@ def cmd_report(a, uid):
 
     from cortex.agents.tracker import followups, format_report, report
     ses, today = _session(), date.today()  # noqa: DTZ011 (the user's local date is what's meant)
-    days = load_config(a.config).get("tracker", {}).get("followup_days", 7)
-    print(format_report(report(ses, uid, today), followups(ses, uid, today, days)))
+    tcfg = load_config(a.config).get("tracker", {})
+    fups = followups(ses, uid, today, tcfg.get("followup_days", 7), tcfg.get("stale_days", 30))
+    print(format_report(report(ses, uid, today), fups))
+
+
+def cmd_undo(a, uid):
+    """Revert the last status change CORTEX recorded for a job (history keeps an 'undo' event)."""
+    from cortex.agents.tracker import TrackerError, undo
+    ses = _session()
+    try:
+        job = undo(ses, uid, a.job_id, note=a.note, audit=AuditLog())
+    except TrackerError as e:
+        raise SystemExit(f"not undone: {e}") from None
+    print(f"job {a.job_id}: {job.company} | {job.title} -> back to {job.status}")
+
+
+def cmd_close_stale(a, uid):
+    """Mark applications with no reply for N days as no_response. Dry run unless --yes."""
+    from datetime import date
+
+    from cortex.agents.tracker import close_stale
+    days = a.days or load_config(a.config).get("tracker", {}).get("stale_days", 30)
+    rows = close_stale(_session(), uid, date.today(), days, dry_run=not a.yes, audit=AuditLog())  # noqa: DTZ011
+    for r in rows:
+        print(f"  {r['days_quiet']:>3}d quiet  [{r['job_id']}] {r['company']} | {r['role']}")
+    print(f"{len(rows)} applications quiet for {days}+ days: "
+          + ("marked no_response" if a.yes else "dry run, nothing changed (add --yes to mark them no_response)"))
 
 
 def cmd_llm_check(a, uid):
@@ -239,14 +264,22 @@ def main(argv=None):
     k.add_argument("--master", default="master_resume.yaml")
     k.add_argument("--contact", default="contact.yaml")
     k.set_defaults(fn=cmd_packet)
-    for status in ("applied", "interview", "offer", "rejected"):
-        s = sub.add_parser(status, help=f"record: job is now {status}")
+    for status in ("applied", "interview", "offer", "rejected", "no_response"):
+        s = sub.add_parser(status.replace("_", "-"), help=f"record: job is now {status}")
         s.add_argument("job_id", type=int)
         s.add_argument("--note", default=None)
         if status == "applied":
             s.add_argument("--date", default=None, help="YYYY-MM-DD (default: today)")
         s.set_defaults(fn=cmd_track, status=status, date=None)
     sub.add_parser("report", help="applications, response rate, follow-ups due").set_defaults(fn=cmd_report)
+    u = sub.add_parser("undo", help="revert the last status change recorded for a job (e.g. 'applied' by mistake)")
+    u.add_argument("job_id", type=int)
+    u.add_argument("--note", default=None)
+    u.set_defaults(fn=cmd_undo)
+    c = sub.add_parser("close-stale", help="mark applications with no reply for N days as no_response (dry run)")
+    c.add_argument("--days", type=int, default=None, help="default: config tracker.stale_days (30)")
+    c.add_argument("--yes", action="store_true", help="actually change them (default: preview only)")
+    c.set_defaults(fn=cmd_close_stale)
     sub.add_parser("llm-check", help="ping every configured LLM provider").set_defaults(fn=cmd_llm_check)
     b = sub.add_parser("bench", help="benchmark local models on the real tailor task")
     b.add_argument("--providers", default="ollama_8b,ollama_granite", help="comma-separated provider names")

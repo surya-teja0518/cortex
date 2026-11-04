@@ -96,7 +96,9 @@ from cortex.agents.tracker import (
     TRANSITIONS,
     TrackerError,
     followups,
+    history,
     report,
+    undo,
     update_status,
 )
 from cortex.core.config import load_config
@@ -115,10 +117,11 @@ for r in ready:
         update_status(session, uid, r["job_id"], "applied", audit=AuditLog())
         st.rerun()
 
-_days = load_config().get("tracker", {}).get("followup_days", 7)
-_fups = followups(session, uid, date.today(), _days)  # noqa: DTZ011 (local date)
+_tcfg = load_config().get("tracker", {})
+_days, _stale = _tcfg.get("followup_days", 7), _tcfg.get("stale_days", 30)
+_fups = followups(session, uid, date.today(), _days, _stale)  # noqa: DTZ011 (local date)
 if _fups:
-    st.subheader(f"Follow-ups due ({len(_fups)}): no update for {_days}+ days")
+    st.subheader(f"Follow-ups due ({len(_fups)}): no update for {_days}-{_stale} days")
     st.dataframe(_fups, use_container_width=True, hide_index=True,
                  column_config={"url": st.column_config.LinkColumn("job link")})
 
@@ -140,6 +143,16 @@ if apps:
             if st.button("Record"):
                 try:
                     update_status(session, uid, pick["job_id"], new, note=tnote or None, audit=AuditLog())
+                    st.rerun()
+                except TrackerError as e:
+                    st.error(str(e))
+        undoable = [a for a in apps if any(e.status != "undo" for e in history(session, uid, a["job_id"]))]
+        if undoable:
+            upick = st.selectbox("Undo the last change for", undoable, key="undo-pick",
+                                 format_func=lambda a: f"[{a['job_id']}] {a['company']} | {a['role']} ({a['status']})")
+            if st.button("Undo last change"):
+                try:
+                    undo(session, uid, upick["job_id"], audit=AuditLog())
                     st.rerun()
                 except TrackerError as e:
                     st.error(str(e))

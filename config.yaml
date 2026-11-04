@@ -47,3 +47,4 @@ tailor:
 
 tracker:
   followup_days: 7           # flag applied/interview jobs with no update for this many days
+  stale_days: 30             # ...up to this many; older ones: `cortex close-stale` -> no_response
