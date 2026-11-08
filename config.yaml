@@ -29,9 +29,20 @@ sources:
     # - {ats: lever, board: <slug>, company: <Name>}
     # - {ats: ashby, board: <slug>, company: <Name>}
     filters:   # word-boundary, case-insensitive; a posting must match a title_include AND a location
-      title_include: [data, database, dba, sql, etl, analytics engineer, ml, machine learning, ai, mlops, platform engineer]
+               # (also used by sources.apify unless it sets its own filters)
+      title_include: [data, database, dba, sql, etl, analytics engineer, ml, machine learning, ai, mlops, platform engineer,
+                      snowflake, databricks, spark, pyspark, oracle, postgres, postgresql, bigquery, redshift, kafka, airflow, synapse]
       title_exclude: [lead, principal, staff, architect, manager, director, head, vp, intern, sales, marketing, scientist]
       locations: [india, hyderabad, bengaluru, bangalore, pune, chennai, mumbai, gurgaon, gurugram, noida, delhi]
+  # SYNAPSE's own Apify runs: `cortex pull` reads their datasets (READ ONLY; never starts a run).
+  # Needs APIFY_TOKEN in .env. Jobs already imported from the sheet merge (same source + job id).
+  apify:
+    since_days: 8        # runs started in the last N days (SYNAPSE runs Tue + Fri)
+    max_runs: 10         # per actor
+    max_items: 1000      # per dataset
+    actors:
+      - {actor: valig~linkedin-jobs-scraper, source: linkedin}
+      - {actor: memo23~naukri-scraper, source: naukri}
 
 # LLM providers and per-agent routes. Keys come from .env (GROQ_API_KEY, GEMINI_API_KEY); never put them here.
 # Model ids change: run `cortex llm-check` after editing. Ids below were picked from each account's own
@@ -65,7 +76,7 @@ tracker:
   followup_days: 7           # flag applied/interview jobs with no update for this many days
   stale_days: 30             # ...up to this many; older ones: `cortex close-stale` -> no_response
 
-# `cortex daily` (fetch -> score -> digest), run by launchd: `cortex schedule --install`.
+# `cortex daily` (pull -> fetch -> score -> digest), run by launchd: `cortex schedule --install`.
 daily:
   hour: 9            # local time on the Mac; launchd runs a missed time when the Mac wakes
   minute: 7

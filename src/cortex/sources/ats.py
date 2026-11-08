@@ -104,6 +104,9 @@ class Posting:
     description: str = ""
     posted: date | None = None
     work_model: str | None = None
+    exp_raw: str | None = None        # source's own experience text; else parsed from the description
+    applicants: int | None = None     # scoring signal when the source has it (LinkedIn, Naukri)
+    comp: str | None = None
 
 
 # ---------- parsers (one per ATS; unknown keys ignored, malformed postings skipped) ----------
@@ -249,29 +252,56 @@ def _clean(v: str, cap: int) -> str:
     return sanitize_jd(v)[0].strip()[:cap]
 
 
-def posting_values(p: Posting, ats: str, board: str, company: str, user_id: str, cfg: dict, today: date):
+def posting_values(p: Posting, source: str, external_id: str, company: str, user_id: str, cfg: dict,
+                   today: date, batch: str) -> dict:
     title, loc = _clean(p.title, 256), _clean(p.location, 256)
     desc, flags = sanitize_jd(p.description)
     _, more = sanitize_jd(f"{title} {loc} {company}")
     flags = sorted(set(flags) | set(more))
     url = p.url if p.url.startswith(("https://", "http://")) else ""
-    exp_raw = infer_exp(desc)
+    exp_raw = _clean(p.exp_raw or "", 128) or infer_exp(desc)
     min_yoe, max_yoe = P.parse_exp(exp_raw)
     track = infer_track(title)
-    job = Job(source=ats, external_id=f"{board}:{p.external_id}"[:128], title=title, company=company,
+    job = Job(source=source, external_id=external_id[:128], title=title, company=company,
               location=loc, url=url or "-", min_yoe=min_yoe, max_yoe=max_yoe)
     gate = run_gates(job, cfg)
-    res = score_job(track=track, stack=infer_stack(desc), location=loc, min_yoe=min_yoe, applicants=None, cfg=cfg)
-    return {"user_id": user_id, "source": ats, "external_id": job.external_id, "batch": f"ats-{today.isoformat()}",
-                "company": company, "title": title, "url": url[:2000], "location": loc,
-                "work_model": _clean(p.work_model or "", 64) or None, "posted": p.posted, "date_added": today,
-                "exp_raw": exp_raw, "min_yoe": min_yoe, "max_yoe": max_yoe, "track": track, "score": res.score, "band": res.band,
-                "score_reasons": json.dumps(res.reasons), "gate_reason": gate,
-                "sanitizer_flags": json.dumps(flags) if flags else None, "description": desc.strip()}
+    res = score_job(track=track, stack=infer_stack(desc), location=loc, min_yoe=min_yoe, applicants=p.applicants,
+                    cfg=cfg)
+    return {"user_id": user_id, "source": source, "external_id": job.external_id, "batch": batch[:64],
+            "company": company, "title": title, "url": url[:2000], "location": loc,
+            "work_model": _clean(p.work_model or "", 64) or None, "comp": _clean(p.comp or "", 128) or None,
+            "posted": p.posted, "date_added": today, "exp_raw": exp_raw, "min_yoe": min_yoe, "max_yoe": max_yoe,
+            "track": track, "score": res.score, "band": res.band, "score_reasons": json.dumps(res.reasons),
+            "gate_reason": gate, "sanitizer_flags": json.dumps(flags) if flags else None,
+            "description": desc.strip()}
 
 
-_UPDATABLE = ("title", "url", "location", "work_model", "posted", "exp_raw", "min_yoe", "max_yoe", "track",
+_UPDATABLE = ("title", "url", "location", "work_model", "comp", "posted", "exp_raw", "min_yoe", "max_yoe", "track",
               "score", "band", "score_reasons", "gate_reason", "sanitizer_flags", "description")
+
+
+def upsert(session, vals: dict, *, own_prefix: str, dry_run: bool) -> str:
+    """Insert, or update a row this source created ('updated'). A row another importer created (e.g. the same
+    LinkedIn job from the SYNAPSE sheet) only gets a missing description ('enriched'): its track / YOE / score
+    are SYNAPSE's judgement and the eval baseline. Never status / applied_date / notes: those are Surya's."""
+    existing = session.scalar(select(JobRow).where(JobRow.user_id == vals["user_id"], JobRow.source == vals["source"],
+                                                   JobRow.external_id == vals["external_id"]))
+    if existing is None:
+        if not dry_run:
+            session.add(JobRow(**vals))
+        return "inserted"
+    if (existing.batch or "").startswith(own_prefix):
+        if not dry_run:
+            for k in _UPDATABLE:
+                setattr(existing, k, vals[k])
+        return "updated"
+    if not existing.description and vals["description"]:
+        if not dry_run:
+            existing.description = vals["description"]
+            if vals["sanitizer_flags"] and not existing.sanitizer_flags:
+                existing.sanitizer_flags = vals["sanitizer_flags"]   # a flagged JD still means manual review
+        return "enriched"
+    return "unchanged"
 
 
 def fetch_all(session, cfg: dict, user_id: str, *, client: httpx.Client | None = None,
@@ -308,21 +338,16 @@ def fetch_all(session, cfg: dict, user_id: str, *, client: httpx.Client | None =
                     continue
                 seen.add(p.external_id)
                 res.kept += 1
-                vals = posting_values(p, ats, board, res.company, user_id, cfg, today)
+                vals = posting_values(p, ats, f"{board}:{p.external_id}", res.company, user_id, cfg, today,
+                                      f"ats-{today.isoformat()}")
                 res.gated += vals["gate_reason"] is not None
                 res.flagged += vals["sanitizer_flags"] is not None
-                existing = session.scalar(select(JobRow).where(
-                    JobRow.user_id == user_id, JobRow.source == ats, JobRow.external_id == vals["external_id"]))
-                if existing is None:
+                what = upsert(session, vals, own_prefix="ats-", dry_run=dry_run)
+                if what == "inserted":
                     res.inserted += 1
                     res.new_jobs.append((vals["title"], vals["location"], vals["band"]))
-                    if not dry_run:
-                        session.add(JobRow(**vals))
                 else:
                     res.updated += 1
-                    if not dry_run:
-                        for k in _UPDATABLE:      # never status / applied_date / notes: those are Surya's
-                            setattr(existing, k, vals[k])
             if audit:
                 audit.log("ats_source", "fetch", user_id=user_id, ats=ats, board=board, fetched=res.fetched,
                           kept=res.kept, inserted=res.inserted, updated=res.updated, dry_run=dry_run)
