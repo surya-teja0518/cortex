@@ -45,6 +45,9 @@ cp answers.example.yaml answers.yaml          # your standard form answers (giti
 # export Google Sheets -> CSV (File > Download > CSV), put files in data/import/ (gitignored)
 cortex import data/import/<master>.csv data/import/<batch>.csv   # master first, then batches oldest -> newest
 cortex fetch --dry-run # public Greenhouse/Lever/Ashby boards from config.yaml (sources.ats.boards); drop --dry-run to save
+cortex score          # LLM-score new jobs (cached; dashboard + digest rank by it; rule score kept for eval)
+cortex digest --dry-run # today's email digest (GMAIL_ADDRESS + GMAIL_APP_PASSWORD in .env); drop --dry-run to send
+cortex daily          # fetch -> score -> digest; `cortex schedule --install` runs it daily via macOS launchd
 cortex stats
 cortex compare        # CORTEX deterministic score vs SYNAPSE Match
 cortex eval           # recall@P0-P1, mean percentile rank; precision + AUC once there are >= 10 negatives
@@ -76,4 +79,9 @@ keeps postings matching title + India-location filters, then runs the same sanit
 manual review), gates, deterministic score and cross-source dedupe. Slugs are validated, redirects are not followed,
 responses are size-capped, and a re-fetch never changes a job's status. Parsers are tested against fixtures built
 from the vendors' documented shapes; live responses are checked with `cortex fetch --dry-run` on the developer's machine.
+Daily run: `cortex daily` = fetch -> LLM-score new jobs -> email digest, scheduled with a launchd job on the Mac
+(local, because the DB and resume never leave it). Each step fails independently and the failure is reported in the
+digest. The digest goes only to the sender's own Gmail (no recipient setting exists), holds counts + company/title
+only, strips links and control characters from job text, and never includes resume content or action links.
+SMTP sending is tested with a fake server; the real Gmail send is checked on the developer's machine.
 Not yet: cover note, real LLM eval numbers (pending runs on the developer machine), Apify adapter.

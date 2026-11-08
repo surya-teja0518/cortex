@@ -25,14 +25,20 @@ def review_queue(session, user_id: str, *, tracks=None, city: str = "", min_syna
     if not include_dups:
         q = q.where(JobRow.dup_of_id.is_(None))
     q = q.order_by(JobRow.synapse_score.desc().nulls_last(), JobRow.score.desc()).limit(limit)
+    from cortex.agents.batch_score import latest_llm_scores
+    rows = list(session.scalars(q))
+    llm = latest_llm_scores(session, user_id, [r.id for r in rows])
     out = []
-    for r in session.scalars(q):
+    for r in rows:
+        o = llm.get(r.id)
         out.append(dict(id=r.id, company=r.company, role=r.title, track=r.track,
+                        llm=o.score if o else None, llm_band=o.band if o else None, source=r.source,
                         synapse=r.synapse_score, synapse_p=r.synapse_priority,
                         cortex=r.score, cortex_band=r.band, location=r.location,
                         exp=r.exp_raw, stack=r.stack_fit, url=r.url, notes=r.notes,
                         flagged=bool(r.sanitizer_flags), gate=r.gate_reason,
                         why=", ".join(json.loads(r.score_reasons or "[]"))))
+    out.sort(key=lambda d: (d["llm"] is None, -(d["llm"] or 0)))   # LLM-ranked first; stable for the rest
     return out
 
 

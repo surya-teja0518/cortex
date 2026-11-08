@@ -106,6 +106,99 @@ def cmd_eval(a, uid):
         raise SystemExit(f"eval stopped: {e}") from None
 
 
+def _build_scorer(cfg: dict, audit, provider: str = "route"):
+    from cortex.agents.scorer import LLMScore, LLMScorer
+    from cortex.core.ratelimit import NoLimit
+    from cortex.llm.router import build_route
+    excl = frozenset(cfg["llm"].get("scorer_exclude_fields", []))
+    router = build_route("scorer", cfg, audit, schema=LLMScore.model_json_schema(),
+                         only=None if provider == "route" else provider)
+    return LLMScorer(router, NoLimit(), audit, cfg["scoring"]["bands"], exclude_fields=excl)
+
+
+def cmd_score(a, uid):
+    """LLM-score new jobs (to_apply, ungated, not dup, not flagged, not scored yet). Newest first."""
+    from cortex.agents.batch_score import score_new
+    cfg, audit = load_config(a.config), AuditLog()
+    scorer = _build_scorer(cfg, audit, a.provider)
+    limit = a.limit or cfg.get("daily", {}).get("score_limit", 100)
+
+    def progress(i, n):
+        if i % 10 == 0 or i == n:
+            print(f"  {i}/{n}", file=sys.stderr, flush=True)
+    r = score_new(_session(), uid, scorer, limit=limit, progress=progress)
+    print(f"candidates={r.candidates} scored={r.scored} kept_rule_score={r.unscored}"
+          + (f"\nstopped early: {r.stopped_early}" if r.stopped_early else ""))
+
+
+def _digest_fn(cfg, uid, audit, dry_run):
+    from datetime import date
+
+    from cortex.core.secrets import get_secret
+    from cortex.notify.digest import render, run_digest, subject
+
+    def digest(ses, notes):
+        d, status = run_digest(ses, uid, date.today(), cfg=cfg, dry_run=dry_run, notes=notes, audit=audit,  # noqa: DTZ011
+                               address=get_secret("GMAIL_ADDRESS", required=False),
+                               password=get_secret("GMAIL_APP_PASSWORD", required=False))
+        if dry_run:
+            print(f"Subject: {subject(d)}\n\n{render(d)}")
+        return status
+    return digest
+
+
+def cmd_digest(a, uid):
+    """Build the email digest; send it to your own GMAIL_ADDRESS (or print it with --dry-run)."""
+    from cortex.notify.digest import DigestError
+    cfg, audit = load_config(a.config), AuditLog()
+    try:
+        print(_digest_fn(cfg, uid, audit, a.dry_run)(_session(), []))
+    except DigestError as e:
+        raise SystemExit(f"digest not sent: {e}") from None
+
+
+def cmd_daily(a, uid):
+    """fetch -> LLM-score new jobs -> digest. What launchd runs. One failing step never stops the rest."""
+    from datetime import datetime
+
+    from cortex.agents.batch_score import score_new
+    from cortex.daily import run_daily
+    from cortex.sources.ats import fetch_all
+    cfg, audit, ses = load_config(a.config), AuditLog(), _session()
+    dcfg = cfg.get("daily", {})
+    has_boards = bool((cfg.get("sources") or {}).get("ats", {}).get("boards"))
+    fetch = (lambda s: fetch_all(s, cfg, uid, audit=audit)) if has_boards and not a.no_fetch else None
+    score = None
+    if not a.no_score:
+        score = lambda s: score_new(s, uid, _build_scorer(cfg, audit), limit=dcfg.get("score_limit", 100))
+    print(f"[{datetime.now():%Y-%m-%d %H:%M}] cortex daily")  # noqa: DTZ005 (local time for the log)
+    res = run_daily(ses, cfg, uid, datetime.now().date(), fetch=fetch, score=score,  # noqa: DTZ005
+                    digest=_digest_fn(cfg, uid, audit, a.dry_run), audit=audit)
+    for n in res.notes:
+        print(f"  {n}")
+    print(f"  digest: {res.digest_status}")
+    if res.failed_steps:
+        raise SystemExit(f"failed steps: {', '.join(res.failed_steps)}")
+
+
+def cmd_schedule(a, uid):
+    """Print or install the launchd job that runs `cortex daily` every day (macOS)."""
+    from pathlib import Path
+
+    from cortex.schedule import LABEL, find_cortex_bin, install, render_plist
+    cfg = load_config(a.config).get("daily", {})
+    hour, minute = cfg.get("hour", 9), cfg.get("minute", 7)
+    repo, exe = Path.cwd().resolve(), find_cortex_bin()
+    if not a.install:
+        sys.stdout.write(render_plist(repo, exe, hour, minute).decode())
+        print(f"\n(preview: run `cortex schedule --install` from the repo folder to install for {hour:02d}:{minute:02d})")
+        return
+    path = install(repo, exe, hour, minute)
+    print(f"wrote {path}\nnow load it (once):\n  launchctl unload {path} 2>/dev/null; launchctl load {path}\n"
+          f"check: launchctl list | grep {LABEL}    log: {repo / 'data' / 'daily.log'}\n"
+          f"stop:  launchctl unload {path}")
+
+
 def cmd_tailor(a, uid):
     """Start one tailoring run. It pauses at the approval gate; approve or reject in the dashboard."""
     from cortex.agents.tailor import Tailor
@@ -268,6 +361,21 @@ def main(argv=None):
     f.add_argument("--board", default=None, help="only this board, e.g. greenhouse:databricks")
     f.add_argument("--dry-run", action="store_true", help="fetch and show what would be added; save nothing")
     f.set_defaults(fn=cmd_fetch)
+    sc = sub.add_parser("score", help="LLM-score new jobs and keep the results (digest + dashboard rank by them)")
+    sc.add_argument("--limit", type=int, default=None, help="max jobs this run (default: config daily.score_limit)")
+    sc.add_argument("--provider", default="route", help="route (default: fallback chain) or one provider name")
+    sc.set_defaults(fn=cmd_score)
+    dg = sub.add_parser("digest", help="email yourself today's digest (GMAIL_ADDRESS + GMAIL_APP_PASSWORD in .env)")
+    dg.add_argument("--dry-run", action="store_true", help="print it instead of sending")
+    dg.set_defaults(fn=cmd_digest)
+    dl = sub.add_parser("daily", help="fetch -> score -> digest (what the schedule runs)")
+    dl.add_argument("--dry-run", action="store_true", help="print the digest instead of sending it")
+    dl.add_argument("--no-fetch", action="store_true")
+    dl.add_argument("--no-score", action="store_true")
+    dl.set_defaults(fn=cmd_daily)
+    sh = sub.add_parser("schedule", help="show / install the macOS launchd job for `cortex daily`")
+    sh.add_argument("--install", action="store_true", help="write ~/Library/LaunchAgents/com.cortex.daily.plist")
+    sh.set_defaults(fn=cmd_schedule)
     sub.add_parser("stats").set_defaults(fn=cmd_stats)
     sub.add_parser("compare").set_defaults(fn=cmd_compare)
     e = sub.add_parser("eval", help="deterministic vs LLM scorer against applied/interview/offer labels")

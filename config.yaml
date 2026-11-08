@@ -64,3 +64,14 @@ tailor:
 tracker:
   followup_days: 7           # flag applied/interview jobs with no update for this many days
   stale_days: 30             # ...up to this many; older ones: `cortex close-stale` -> no_response
+
+# `cortex daily` (fetch -> score -> digest), run by launchd: `cortex schedule --install`.
+daily:
+  hour: 9            # local time on the Mac; launchd runs a missed time when the Mac wakes
+  minute: 7
+  score_limit: 100   # LLM calls per run (Groq free tier: ~500 scoring calls/day)
+
+# Email digest to your own GMAIL_ADDRESS (.env). Counts + company/title only; no links; never resume content.
+digest:
+  top_n: 15
+  send_when_empty: false

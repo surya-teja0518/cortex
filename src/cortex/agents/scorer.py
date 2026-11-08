@@ -50,6 +50,7 @@ class ScoringInput(BaseModel):
                    work_model=r.work_model, notes=r.notes, description=r.description or None)
 
 
+DESCRIPTION_CAP = 4000   # chars of JD in the scorer prompt: ATS JDs run to 20k and free tiers cap tokens/min
 PROMPT_FIELDS = ("title", "company", "location", "exp_raw", "stack_fit", "work_model", "notes", "description")
 
 
@@ -67,8 +68,10 @@ def render_job_fields(job: ScoringInput, exclude: frozenset[str] = frozenset()) 
         val = getattr(job, f)
         if not val:
             continue
-        clean, fl = sanitize_jd(val)
+        clean, fl = sanitize_jd(val)          # injection scan runs on the FULL text, before any cap
         flags += [f"{f}:{p}" for p in fl]
+        if f == "description" and len(clean) > DESCRIPTION_CAP:
+            clean = clean[:DESCRIPTION_CAP] + " [truncated]"
         lines.append(f"{f}: {clean}")
     return wrap_untrusted("\n".join(lines)), flags
 
