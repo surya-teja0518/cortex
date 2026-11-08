@@ -33,3 +33,16 @@ def test_audit_chain_and_tamper():
     assert a.verify()
     txt = open(p).read().replace('"n": 3', '"n": 99'); open(p, "w").write(txt)
     assert not a.verify()
+
+
+def test_consolidated_sheet_statuses():
+    from cortex.core.parsing import normalize_status as n
+    assert n("No Longer Accepting Applications") == "not_accepting"
+    assert n("Weak Profile") == n("Skills doesn't match for role specified in resume") == "skills_mismatch"
+    assert n("Experience Doesn't match") == n("Experience doesn't match") == "exp_mismatch"
+    assert n("Duplicate entry") == "duplicate"
+
+
+def test_skills_mismatch_is_a_negative_label():
+    from cortex.eval import NEGATIVE_STATUSES
+    assert {"exp_mismatch", "skills_mismatch"} <= set(NEGATIVE_STATUSES)

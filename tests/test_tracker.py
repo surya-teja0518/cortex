@@ -230,3 +230,11 @@ def test_cli_undo_no_response_close_stale(ses, tmp_path, monkeypatch, capsys):
     main(["applied", str(k.id)])
     main(["no-response", str(k.id)])
     assert "-> no_response" in capsys.readouterr().out
+
+
+def test_imported_applied_without_date_falls_back_to_date_added(ses):
+    j = add(ses, 1, "applied", date_added=date(2026, 9, 1))          # sheet row: Applied, no Applied Date
+    assert [r["job_id"] for r in followups(ses, "u1", TODAY, 7, max_days=None)] == [j.id]
+    assert [r["job_id"] for r in close_stale(ses, "u1", TODAY, 30)] == [j.id]
+    k = add(ses, 2, "applied")                                          # no dates at all: still invisible
+    assert k.id not in [r["job_id"] for r in followups(ses, "u1", TODAY, 7, max_days=None)]
