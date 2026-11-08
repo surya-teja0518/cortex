@@ -82,10 +82,17 @@ def stack_category(text: str) -> str:
 _STATUS = {"to apply": "to_apply", "applied": "applied", "closed": "closed",
            "not accepting": "not_accepting", "not accepting applications": "not_accepting",
            "experience doesn't match": "exp_mismatch", "interview": "interview",
-           "offer": "offer", "rejected": "rejected", "no response": "no_response", "ghosted": "no_response"}
+           "offer": "offer", "rejected": "rejected", "no response": "no_response", "ghosted": "no_response",
+           # seen in the consolidated tracker (2026-11-08)
+           "no longer accepting applications": "not_accepting",
+           "weak profile": "skills_mismatch",                       # his call: not a fit -> negative label
+           "skills doesn't match for role specified in resume": "skills_mismatch",
+           "skills don't match": "skills_mismatch", "skills mismatch": "skills_mismatch",
+           "duplicate entry": "duplicate", "duplicate": "duplicate"}
 # pending_approval/approved are CORTEX-internal; ranked above to_apply so a tracker re-import
 # can't silently reset a job that is waiting for (or has passed) human approval.
 STATUS_RANK = {"to_apply": 0, "pending_approval": 1, "approved": 1, "closed": 1, "not_accepting": 1, "exp_mismatch": 1,
+               "skills_mismatch": 1, "duplicate": 1,
                "applied": 2, "interview": 3, "rejected": 3, "no_response": 3, "offer": 4}
 
 

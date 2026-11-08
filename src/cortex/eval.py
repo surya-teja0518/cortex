@@ -25,7 +25,7 @@ from cortex.db.schema import JobRow, LLMScoreCacheRow, SkipRow
 # A positive is a job Surya CHOSE to apply to, whatever the employer did next: the scorer predicts his
 # choices, so rejected / no_response applications are still positives.
 POSITIVE_STATUSES = ("applied", "interview", "offer", "rejected", "no_response")
-NEGATIVE_STATUSES = ("exp_mismatch",)
+NEGATIVE_STATUSES = ("exp_mismatch", "skills_mismatch")   # jobs he looked at and turned down
 TOP_BANDS = ("P0", "P1")
 MIN_NEGATIVES = 10
 BOOTSTRAP_RESAMPLES = 2000
@@ -201,7 +201,7 @@ def format_report(rep: EvalReport) -> str:
     has_neg = rep.negatives >= MIN_NEGATIVES
     lines = [(f"population={rep.population} (ungated, deduped)  positives={rep.positives} "
               f"(status in {'/'.join(POSITIVE_STATUSES)})  negatives={rep.negatives} "
-              f"(exp_mismatch={rep.negatives_from_status}, skips={rep.skips})"),
+              f"(status {'/'.join(NEGATIVE_STATUSES)}={rep.negatives_from_status}, skips={rep.skips})"),
              f"{'scorer':<26}{'recall@P0-P1':>14}{'top share':>11}{'lift':>7}{'mean pct rank':>15}"
              + (f"{'prec@P0-P1':>16}{'pos>neg AUC':>13}" if has_neg else "") + f"{'llm_unscored':>14}"]
     for m in rep.metrics:

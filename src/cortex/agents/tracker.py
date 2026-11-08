@@ -133,7 +133,12 @@ def _last_activity(session, user_id: str, job: JobRow) -> date | None:
     ev = session.scalar(select(ApplicationEventRow.at).where(
         ApplicationEventRow.user_id == user_id, ApplicationEventRow.job_id == job.id)
         .order_by(ApplicationEventRow.at.desc()))
-    return ev.date() if ev else job.applied_date   # imported tracker rows have a date but no events
+    if ev:
+        return ev.date()
+    # Imported sheet rows have no events. Most real "Applied" rows (96 of 111, 2026-11-08) have no Applied Date
+    # either; Date Added is the closest lower bound (he can't apply before the job was added), so days-quiet
+    # can be overstated by the gap between adding and applying. Without it those rows never reach follow-ups.
+    return job.applied_date or job.date_added
 
 
 def followups(session, user_id: str, today: date, days: int = 7, max_days: int | None = 30) -> list[dict]:
