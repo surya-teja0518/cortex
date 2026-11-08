@@ -19,10 +19,21 @@ class DailyResult:
 
 
 def run_daily(session, cfg: dict, user_id: str, today: date, *, fetch: Callable | None, score: Callable | None,
-              digest: Callable, audit: AuditLog | None = None) -> DailyResult:
-    """fetch(session) -> list[BoardResult]; score(session) -> BatchResult; digest(session, notes) -> status.
-    Pass None to skip a step."""
+              digest: Callable, audit: AuditLog | None = None, pull: Callable | None = None) -> DailyResult:
+    """pull(session) -> list[ActorResult]; fetch(session) -> list[BoardResult]; score(session) -> BatchResult;
+    digest(session, notes) -> status. Pass None to skip a step."""
     res = DailyResult()
+    if pull is not None:
+        try:
+            actors = pull(session)
+            bad = [f"{a.actor} ({a.error})" for a in actors if a.error]
+            res.notes.append(f"apify: {sum(a.datasets for a in actors)} datasets, {sum(a.inserted for a in actors)} new"
+                             f" jobs" + (f"; failed: {', '.join(bad)}" if bad else ""))
+        except Exception as e:  # noqa: BLE001 — one step failing must not cost the digest
+            session.rollback()
+            res.failed_steps.append("pull")
+            res.notes.append(f"apify FAILED: {type(e).__name__}"
+                             + (f" ({e})" if type(e).__name__ == "ApifyError" else ""))
     if fetch is not None:
         try:
             boards = fetch(session)

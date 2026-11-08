@@ -45,6 +45,26 @@ def cmd_fetch(a, uid):
     print(f"{total} new jobs" + (" (dry run: nothing saved)" if a.dry_run else "; review them in the dashboard"))
 
 
+def cmd_pull(a, uid):
+    """Read SYNAPSE's recent Apify datasets (LinkedIn/Naukri). Read only: never starts an actor run."""
+    from cortex.sources.apify import ApifyError, pull_all
+    cfg = load_config(a.config)
+    try:
+        res = pull_all(_session(), cfg, uid, audit=AuditLog(), dry_run=a.dry_run)
+    except ApifyError as e:
+        raise SystemExit(f"not pulled: {e}") from None
+    for r in res:
+        if r.error:
+            print(f"{r.actor}: ERROR {r.error}")
+            continue
+        print(f"{r.actor}: datasets={r.datasets} items={r.items} relevant={r.kept} new={r.inserted} "
+              f"updated={r.updated} enriched_sheet_rows={r.enriched} gated={r.gated} flagged={r.flagged}")
+        for c, t, loc, band in r.new_jobs[:10]:
+            print(f"    + [{band}] {c} | {t} | {loc}")
+    total = sum(r.inserted for r in res)
+    print(f"{total} new jobs" + (" (dry run: nothing saved)" if a.dry_run else ""))
+
+
 def cmd_stats(a, uid):
     ses = _session()
     for label, col in (("status", JobRow.status), ("track", JobRow.track), ("cortex band", JobRow.band)):
@@ -168,11 +188,16 @@ def cmd_daily(a, uid):
     dcfg = cfg.get("daily", {})
     has_boards = bool((cfg.get("sources") or {}).get("ats", {}).get("boards"))
     fetch = (lambda s: fetch_all(s, cfg, uid, audit=audit)) if has_boards and not a.no_fetch else None
+    has_actors = bool((cfg.get("sources") or {}).get("apify", {}).get("actors"))
+    pull = None
+    if has_actors and not a.no_pull:
+        from cortex.sources.apify import pull_all
+        pull = lambda s: pull_all(s, cfg, uid, audit=audit)
     score = None
     if not a.no_score:
         score = lambda s: score_new(s, uid, _build_scorer(cfg, audit), limit=dcfg.get("score_limit", 100))
     print(f"[{datetime.now():%Y-%m-%d %H:%M}] cortex daily")  # noqa: DTZ005 (local time for the log)
-    res = run_daily(ses, cfg, uid, datetime.now().date(), fetch=fetch, score=score,  # noqa: DTZ005
+    res = run_daily(ses, cfg, uid, datetime.now().date(), fetch=fetch, score=score, pull=pull,  # noqa: DTZ005
                     digest=_digest_fn(cfg, uid, audit, a.dry_run), audit=audit)
     for n in res.notes:
         print(f"  {n}")
@@ -357,6 +382,9 @@ def main(argv=None):
     i = sub.add_parser("import", help="import SYNAPSE tracker CSV exports (master first, then batches)")
     i.add_argument("files", nargs="+")
     i.set_defaults(fn=cmd_import)
+    pl = sub.add_parser("pull", help="read SYNAPSE's recent Apify datasets (APIFY_TOKEN in .env); never starts runs")
+    pl.add_argument("--dry-run", action="store_true", help="show what would be added; save nothing")
+    pl.set_defaults(fn=cmd_pull)
     f = sub.add_parser("fetch", help="pull postings from public ATS boards (Greenhouse/Lever/Ashby) in config.yaml")
     f.add_argument("--board", default=None, help="only this board, e.g. greenhouse:databricks")
     f.add_argument("--dry-run", action="store_true", help="fetch and show what would be added; save nothing")
@@ -368,9 +396,10 @@ def main(argv=None):
     dg = sub.add_parser("digest", help="email yourself today's digest (GMAIL_ADDRESS + GMAIL_APP_PASSWORD in .env)")
     dg.add_argument("--dry-run", action="store_true", help="print it instead of sending")
     dg.set_defaults(fn=cmd_digest)
-    dl = sub.add_parser("daily", help="fetch -> score -> digest (what the schedule runs)")
+    dl = sub.add_parser("daily", help="pull -> fetch -> score -> digest (what the schedule runs)")
     dl.add_argument("--dry-run", action="store_true", help="print the digest instead of sending it")
     dl.add_argument("--no-fetch", action="store_true")
+    dl.add_argument("--no-pull", action="store_true")
     dl.add_argument("--no-score", action="store_true")
     dl.set_defaults(fn=cmd_daily)
     sh = sub.add_parser("schedule", help="show / install the macOS launchd job for `cortex daily`")

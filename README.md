@@ -45,9 +45,10 @@ cp answers.example.yaml answers.yaml          # your standard form answers (giti
 # export Google Sheets -> CSV (File > Download > CSV), put files in data/import/ (gitignored)
 cortex import data/import/<master>.csv data/import/<batch>.csv   # master first, then batches oldest -> newest
 cortex fetch --dry-run # public Greenhouse/Lever/Ashby boards from config.yaml (sources.ats.boards); drop --dry-run to save
+cortex pull --dry-run # read SYNAPSE's recent Apify datasets (LinkedIn/Naukri; APIFY_TOKEN); never starts a run
 cortex score          # LLM-score new jobs (cached; dashboard + digest rank by it; rule score kept for eval)
 cortex digest --dry-run # today's email digest (GMAIL_ADDRESS + GMAIL_APP_PASSWORD in .env); drop --dry-run to send
-cortex daily          # fetch -> score -> digest; `cortex schedule --install` runs it daily via macOS launchd
+cortex daily          # pull -> fetch -> score -> digest; `cortex schedule --install` runs it daily via macOS launchd
 cortex stats
 cortex compare        # CORTEX deterministic score vs SYNAPSE Match
 cortex eval           # recall@P0-P1, mean percentile rank; precision + AUC once there are >= 10 negatives
@@ -84,4 +85,9 @@ Daily run: `cortex daily` = fetch -> LLM-score new jobs -> email digest, schedul
 digest. The digest goes only to the sender's own Gmail (no recipient setting exists), holds counts + company/title
 only, strips links and control characters from job text, and never includes resume content or action links.
 SMTP sending is tested with a fake server; the real Gmail send is checked on the developer's machine.
+Apify source: `cortex pull` reads the datasets SYNAPSE's own scheduled Apify runs already produced (read-only API with
+the owner's token; it never starts a run or touches LinkedIn). Rows merge with the same jobs imported from the sheet
+(same source + job id), which only gain a missing description. The parsers were built and checked against real dataset
+rows; that check found Naukri rows with no company object (now read from the company URL) and Snowflake titles that
+the first title filter dropped. LinkedIn applicant counts now feed the deterministic score.
 Not yet: cover note, real LLM eval numbers (pending runs on the developer machine), Apify adapter.
