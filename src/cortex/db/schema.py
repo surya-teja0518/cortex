@@ -141,6 +141,17 @@ class PacketRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
+class DigestRunRow(Base):
+    """One row per digest actually sent. max_job_id is the watermark: the next digest's "new jobs" are the
+    ones above it. Counts only, no job text. New table: no migration."""
+    __tablename__ = "digest_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    sent_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    max_job_id: Mapped[int] = mapped_column(Integer, default=0)
+    new_jobs: Mapped[int] = mapped_column(Integer, default=0)
+
+
 def get_session(url: str = "sqlite:///data/cortex.db"):
     engine = create_engine(url)
     Base.metadata.create_all(engine)
