@@ -46,3 +46,21 @@ def test_consolidated_sheet_statuses():
 def test_skills_mismatch_is_a_negative_label():
     from cortex.eval import NEGATIVE_STATUSES
     assert {"exp_mismatch", "skills_mismatch"} <= set(NEGATIVE_STATUSES)
+
+
+def test_oa_column_status_hint():
+    from cortex.core.config import load_config
+    from cortex.sources.synapse_import import oa_status_hint, row_to_values
+    cfg = load_config("config.yaml")
+    base = {"company": "Acme", "role": "Data Engineer", "url": "https://in.linkedin.com/jobs/view/4460313691",
+            "source": "LinkedIn", "track": "Data"}
+    st = lambda **kw: row_to_values({**base, **kw}, "u1", "b", cfg)[0]["status"]
+    assert st(status="To Apply", oa="Applied") == "applied"
+    assert st(status="To Apply", oa="No longer accepting applications") == "not_accepting"
+    assert st(status="Applied", oa="No longer under consideration") == "rejected"
+    assert st(status="Applied", oa="Applied") == "applied"
+    assert st(status="To Apply", oa="No DBT hands-on") == "to_apply"            # free text ignored
+    assert st(status="Applied", oa="No longer accepting applications") == "applied"   # never downgrades
+    assert oa_status_hint("") is None and oa_status_hint("Resume parsing error on platform") is None
+    v = row_to_values({**base, "status": "To Apply", "oa": "Applied"}, "u1", "b", cfg)[0]
+    assert v["status_raw"] == "To Apply (OA: Applied)"
