@@ -34,7 +34,11 @@ class TrackError(ValueError):
 
 class TrackTailor:
     def __init__(self, master: MasterResume, track_map: dict[str, str] | None = None,
-                 default_track: str = "data_engineer", override: str | None = None):
+                 default_track: str = "data_engineer", override: str | None = None, original: bool = False):
+        """original=True: Surya's own PDF goes into the packet as-is. The track is picked by classifying the job
+        (core/skillfit.best_track), bullets keep his order, and based_on is 'original:<track>' so the packet
+        copies resumes/<track>.pdf instead of rendering one."""
+        self.original = original
         if not master.tracks:
             raise TrackError("master_resume.yaml has no `tracks:` section (your three curated resumes)")
         self.master = master
@@ -44,13 +48,20 @@ class TrackTailor:
             raise TrackError(f"unknown track {override!r}; have {sorted(master.tracks)}")
         self.override = override
         self._guard = TruthGuard(master)   # reused only for its tech-term detection
+        self._matcher = None
+        if original:
+            from cortex.core.skillfit import SkillMatcher
+            self._matcher = SkillMatcher(master)
 
     def track_for(self, job: ScoringInput, job_track: str | None) -> str:
         if self.override:
             return self.override
         name = self.track_map.get(job_track or "", self.default_track)
-        return name if name in self.master.tracks else self.default_track if self.default_track in self.master.tracks \
+        name = name if name in self.master.tracks else self.default_track if self.default_track in self.master.tracks \
             else next(iter(self.master.tracks))
+        if self._matcher is not None:
+            name = self._matcher.best_track(job.title, job.description or "", name)
+        return name
 
     def _job_terms(self, job: ScoringInput) -> tuple[set[str], set[str]]:
         text = " ".join(x for x in (job.title, job.stack_fit, job.notes, job.description) if x)
@@ -68,8 +79,8 @@ class TrackTailor:
         tr = self.master.tracks[name]
         terms, words = self._job_terms(job)
 
-        def ordered(bullets):   # stable: equal scores keep the curated order
-            return sorted(bullets, key=lambda b: -self._score(b, terms, words))
+        def ordered(bullets):   # stable: equal scores keep the curated order; original mode keeps his order
+            return list(bullets) if self.original else sorted(bullets, key=lambda b: -self._score(b, terms, words))
 
         skills = list(dict.fromkeys(s for g in tr.skill_groups for s in g.skills))
         return TailoredResume.model_validate({
@@ -77,7 +88,8 @@ class TrackTailor:
             "skill_groups": [g.model_dump() for g in tr.skill_groups],
             "roles": [{**r.model_dump(), "bullets": ordered(r.bullets)} for r in tr.roles],
             "projects": [{"name": p.name, "bullets": ordered(p.bullets)} for p in tr.projects],
-            "certifications": list(tr.certifications), "based_on": f"track:{name}",
+            "certifications": list(tr.certifications),
+            "based_on": f"{'original' if self.original else 'track'}:{name}",
         })
 
     def for_job(self, wrapped_job: str, *, job: ScoringInput | None = None, job_track: str | None = None,

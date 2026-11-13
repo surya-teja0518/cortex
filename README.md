@@ -54,7 +54,7 @@ cortex daily          # pull -> fetch -> score -> digest; `cortex schedule --ins
 cortex stats
 cortex compare        # CORTEX deterministic score vs SYNAPSE Match
 cortex eval           # recall@P0-P1, mean percentile rank; precision + AUC once there are >= 10 negatives
-cortex tailor <job_id> # pick the right curated resume, reorder bullets for the job -> Truth Guard -> approval gate
+cortex tailor <job_id> # pick which of your 3 resumes fits (DBA / DE / AI) -> approval gate -> packet with your own PDF
 cortex packet <job_id> # PDF resume + job.md for an approved job (also built automatically on approval)
 cortex applied <job_id> # after you apply (also: interview / offer / rejected / no-response); history is kept
 cortex report         # applications, response rate, per week, follow-ups due

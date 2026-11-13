@@ -89,7 +89,8 @@ class PacketResult:
 
 class PacketBuilder:
     def __init__(self, master: MasterResume, contact: ContactInfo, root: str | Path = "packets",
-                 answers: StandardAnswers | None = None):
+                 answers: StandardAnswers | None = None, originals_dir: str | Path = "resumes"):
+        self.originals_dir = Path(originals_dir)
         self.master = master
         self.contact = contact
         self.answers = answers
@@ -112,7 +113,10 @@ class PacketBuilder:
         folder = self.folder_for(user_id, job_id, company, title)
         folder.mkdir(parents=True, exist_ok=True)
         pdf = folder / "resume.pdf"
-        self._render_pdf(resume, pdf, company=company, title=title)
+        if (resume.based_on or "").startswith("original:"):
+            self._copy_original(resume.based_on.split(":", 1)[1], pdf)
+        else:
+            self._render_pdf(resume, pdf, company=company, title=title)
         cover_pdf = cover_txt = None
         if resume.cover_note:
             cover_txt = folder / "cover_note.txt"
@@ -124,6 +128,20 @@ class PacketBuilder:
         md = folder / "job.md"
         md.write_text(self._job_md(company, title, location, url, has_cover=bool(resume.cover_note)))
         return PacketResult(folder, pdf, md, cover_pdf, cover_txt, wd)
+
+    def _copy_original(self, track: str, dest: Path) -> None:
+        """Surya's own resume file, byte for byte. Track names come from master_resume.yaml, but are still
+        checked so a name can never point outside resumes/."""
+        if not re.fullmatch(r"[a-z0-9_]{1,40}", track):
+            raise PacketError(f"invalid track name {track!r}")
+        src = self.originals_dir / f"{track}.pdf"
+        if not src.is_file():
+            raise PacketError(f"{src} not found: save your {track.replace('_', ' ')} resume PDF there "
+                              f"(files: {self.originals_dir}/data_engineer.pdf, oracle_dba.pdf, ai_ml.pdf)")
+        data = src.read_bytes()
+        if not data.startswith(b"%PDF"):
+            raise PacketError(f"{src} is not a PDF")
+        dest.write_bytes(data)
 
     # ---- rendering ----
     def _job_md(self, company: str, title: str, location: str, url: str | None, has_cover: bool = False) -> str:
