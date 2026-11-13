@@ -88,7 +88,8 @@ _STATUS = {"to apply": "to_apply", "applied": "applied", "closed": "closed",
            "weak profile": "skills_mismatch",                       # his call: not a fit -> negative label
            "skills doesn't match for role specified in resume": "skills_mismatch",
            "skills don't match": "skills_mismatch", "skills mismatch": "skills_mismatch",
-           "duplicate entry": "duplicate", "duplicate": "duplicate"}
+           "duplicate entry": "duplicate", "duplicate": "duplicate",
+           "no longer under consideration": "rejected"}
 # pending_approval/approved are CORTEX-internal; ranked above to_apply so a tracker re-import
 # can't silently reset a job that is waiting for (or has passed) human approval.
 STATUS_RANK = {"to_apply": 0, "pending_approval": 1, "approved": 1, "closed": 1, "not_accepting": 1, "exp_mismatch": 1,

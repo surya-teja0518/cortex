@@ -69,6 +69,17 @@ def _txt(v, cap: int = 256) -> str:
     return clean.strip()[:cap]
 
 
+_OA_HINTS = ("applied", "not_accepting", "rejected", "no_response")
+
+
+def oa_status_hint(oa) -> str | None:
+    """In the real consolidated sheet, statuses were sometimes typed into the OA column instead of Status
+    (12x "Applied", 28x "No longer accepting applications", 1x "No longer under consideration" on 2026-11-08).
+    Only these exact recognised statuses count; free-text OA notes ("No DBT hands-on") are ignored."""
+    s = P.normalize_status(_txt(oa, 64)) if _txt(oa, 64) else None
+    return s if s in _OA_HINTS else None
+
+
 def row_to_values(raw: dict, user_id: str, batch: str, cfg: dict) -> tuple[dict, dict] | None:
     company, title = _txt(raw.get("company")), _txt(raw.get("role"))
     if not company or not title:
@@ -89,6 +100,10 @@ def row_to_values(raw: dict, user_id: str, batch: str, cfg: dict) -> tuple[dict,
                     applicants=None, cfg=cfg)
     match = str(raw.get("match") or "").strip()
     status_raw = _txt(raw.get("status"), 64)
+    status = P.normalize_status(status_raw)
+    hint = oa_status_hint(raw.get("oa"))
+    if hint and P.STATUS_RANK.get(hint, 0) > P.STATUS_RANK.get(status, 0):
+        status, status_raw = hint, f"{status_raw} (OA: {_txt(raw.get('oa'), 40)})"[:64]
     vals = dict(
         user_id=user_id, source=source, external_id=job.external_id, batch=batch[:64],
         company=company, title=title, url=url, location=location,
@@ -102,7 +117,7 @@ def row_to_values(raw: dict, user_id: str, batch: str, cfg: dict) -> tuple[dict,
         synapse_priority=_txt(raw.get("priority"), 4) or None,
         track=track, score=res.score, band=res.band, score_reasons=json.dumps(res.reasons),
         gate_reason=gate, sanitizer_flags=json.dumps(flags) if flags else None,
-        status=P.normalize_status(status_raw), status_raw=status_raw or None,
+        status=status, status_raw=status_raw or None,
         applied_date=P.parse_date(raw.get("applied_date")),
         oa=_txt(raw.get("oa"), 64) or None, interview=_txt(raw.get("interview"), 64) or None,
         hr=_txt(raw.get("hr"), 64) or None, offer=_txt(raw.get("offer"), 64) or None,
