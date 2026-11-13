@@ -254,10 +254,10 @@ def cmd_tailor(a, uid):
     tcfg = cfg.get("tailor", {})
     mode = a.mode or tcfg.get("mode", "track")
     router = None
-    if mode == "track":
+    if mode in ("track", "original"):
         try:
             tailor = TrackTailor(master, tcfg.get("track_map"), tcfg.get("default_track", "data_engineer"),
-                                 override=a.track)
+                                 override=a.track, original=mode == "original")
         except TrackError as e:
             raise SystemExit(f"track mode: {e}. Add tracks, or run with --mode llm") from None
     else:
@@ -276,14 +276,15 @@ def cmd_tailor(a, uid):
 
 
 def packet_builder(master_path: str = "master_resume.yaml", contact_path: str = "contact.yaml",
-                   answers_path: str = "answers.yaml"):
+                   answers_path: str = "answers.yaml", originals_dir: str | None = None):
     """PacketBuilder from the local master + contact (+ optional answers) files, or (None, reason)."""
     from cortex.agents.packet import PacketBuilder, PacketError, load_contact
     from cortex.agents.workday import load_answers
     from cortex.core.resume import load_master
     try:
+        odir = originals_dir or load_config().get("tailor", {}).get("originals_dir", "resumes")
         return PacketBuilder(load_master(master_path), load_contact(contact_path),
-                             answers=load_answers(answers_path)), None
+                             answers=load_answers(answers_path), originals_dir=odir), None
     except (OSError, ValueError, PacketError) as e:
         return None, str(e)
 
@@ -500,7 +501,7 @@ def main(argv=None):
     e.set_defaults(fn=cmd_eval)
     t = sub.add_parser("tailor", help="tailor a resume for one job; pauses for approval in the dashboard")
     t.add_argument("job_id", type=int)
-    t.add_argument("--mode", choices=["track", "llm"], default=None,
+    t.add_argument("--mode", choices=["original", "track", "llm"], default=None,
                    help="track (default): pick one of your curated resumes and reorder bullets; llm: rewrite with Ollama")
     t.add_argument("--track", default=None, help="force a track, e.g. oracle_dba (default: from the job's track)")
     t.add_argument("--provider", default=None, help="llm mode: pin one provider (must be local)")
