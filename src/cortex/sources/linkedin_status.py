@@ -143,3 +143,29 @@ def check_open(session, cfg: dict, user_id: str, *, today: date | None = None, c
         audit.log("linkedin_check", "run", user_id=user_id, candidates=res.candidates, checked=res.checked,
                   open=res.open, closed=res.closed, unknown=res.unknown, stopped=bool(res.stopped), dry_run=dry_run)
     return res
+
+
+def check_before_tailor(session, cfg: dict, user_id: str, job: JobRow, *, today: date | None = None,
+                        client: httpx.Client | None = None) -> str:
+    """One request for the job Surya is about to tailor: 'open' | 'closed' | 'unknown' | 'skipped'.
+    Skipped when the check is disabled or the job isn't a LinkedIn to_apply job. A closed job is marked
+    not_accepting (same as check-open); throttling or an unclear page returns 'unknown' and never blocks."""
+    if not (cfg.get("linkedin_check") or {}).get("enabled", False) or job.source != "linkedin" \
+            or job.status != "to_apply":
+        return "skipped"
+    today = today or date.today()  # noqa: DTZ011 (local date)
+    own = client is None
+    client = client or httpx.Client(headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
+    try:
+        verdict = check_one(client, job.external_id)
+    except Throttled:
+        return "unknown"
+    finally:
+        if own:
+            client.close()
+    if verdict != "unknown":
+        _record(session, user_id, job.id, verdict, today)
+    if verdict == "closed":
+        job.status, job.status_raw = "not_accepting", f"auto: LinkedIn says closed {today.isoformat()}"
+    session.commit()
+    return verdict

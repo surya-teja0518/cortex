@@ -252,6 +252,15 @@ def cmd_tailor(a, uid):
 
     cfg, master, audit, ses = load_config(a.config), load_master(a.master), AuditLog(), _session()
     tcfg = cfg.get("tailor", {})
+    job = ses.get(JobRow, a.job_id)
+    if job is not None and job.user_id == uid and not a.force:
+        from cortex.sources.linkedin_status import check_before_tailor
+        verdict = check_before_tailor(ses, cfg, uid, job)
+        if verdict == "closed":
+            raise SystemExit(f"job {a.job_id}: LinkedIn says it's no longer accepting applications; marked "
+                             "not_accepting, nothing tailored. (--force to tailor anyway)")
+        if verdict == "unknown":
+            print(f"job {a.job_id}: couldn't confirm it's still open (LinkedIn unclear or throttled); tailoring anyway")
     mode = a.mode or tcfg.get("mode", "track")
     router = None
     if mode in ("track", "original"):
@@ -501,6 +510,7 @@ def main(argv=None):
     e.set_defaults(fn=cmd_eval)
     t = sub.add_parser("tailor", help="tailor a resume for one job; pauses for approval in the dashboard")
     t.add_argument("job_id", type=int)
+    t.add_argument("--force", action="store_true", help="skip the is-it-still-open check")
     t.add_argument("--mode", choices=["original", "track", "llm"], default=None,
                    help="track (default): pick one of your curated resumes and reorder bullets; llm: rewrite with Ollama")
     t.add_argument("--track", default=None, help="force a track, e.g. oracle_dba (default: from the job's track)")

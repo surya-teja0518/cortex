@@ -140,3 +140,20 @@ def test_highest_llm_score_checked_first(ses):
     check_open(ses, CFG, "u1", today=TODAY, sleep=lambda s: None, client=client({}, calls))
     assert [c.url.path.rsplit("/", 1)[-1] for c in calls] == ["7000002", "7000001", "7000003"]
     assert unscored.id
+
+
+def test_check_before_tailor(ses):
+    from cortex.db.schema import JobCheckRow
+    from cortex.sources.linkedin_status import check_before_tailor
+    closed, opened, other = add(ses, "8000001"), add(ses, "8000002"), add(ses, "8000003", source="naukri")
+    pages = {"8000001": (200, CLOSED_HTML), "8000002": (200, OPEN_HTML)}
+    assert check_before_tailor(ses, CFG, "u1", closed, today=TODAY, client=client(pages)) == "closed"
+    assert closed.status == "not_accepting"
+    assert check_before_tailor(ses, CFG, "u1", opened, today=TODAY, client=client(pages)) == "open"
+    assert opened.status == "to_apply" and ses.query(JobCheckRow).count() == 2
+    assert check_before_tailor(ses, CFG, "u1", other, today=TODAY, client=client(pages)) == "skipped"
+    assert check_before_tailor(ses, {}, "u1", opened, today=TODAY, client=client(pages)) == "skipped"   # disabled
+    throttled = add(ses, "8000004")
+    assert check_before_tailor(ses, CFG, "u1", throttled, today=TODAY,
+                               client=client({"8000004": (429, "")})) == "unknown"
+    assert throttled.status == "to_apply"                                       # never blocks on doubt
