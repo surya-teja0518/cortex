@@ -86,8 +86,9 @@ freshness:
 # may throttle or CAPTCHA your home IP; the run stops at the first push-back. Never part of `cortex daily`.
 linkedin_check:
   enabled: false
-  max_per_run: 60        # jobs per run (hard cap)
-  delay_seconds: 6       # between requests, plus random jitter; never below 3
+  max_per_run: 20        # jobs per run (hard cap). First real run: LinkedIn sent 429 after 23 requests at ~6 s
+  delay_seconds: 10      # between requests, plus random jitter; never below 3
+  recheck_days: 3        # a job checked open isn't re-checked for this long, so runs rotate through the queue
   max_age_days: 30       # only check postings newer than this; older ones are hidden in the queue anyway
 
 # `cortex daily` (pull -> fetch -> score -> digest), run by launchd: `cortex schedule --install`.
