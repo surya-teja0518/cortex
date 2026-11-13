@@ -64,3 +64,10 @@ def test_oa_column_status_hint():
     assert oa_status_hint("") is None and oa_status_hint("Resume parsing error on platform") is None
     v = row_to_values({**base, "status": "To Apply", "oa": "Applied"}, "u1", "b", cfg)[0]
     assert v["status_raw"] == "To Apply (OA: Applied)"
+
+
+def test_track_names_from_consolidated_sheet():
+    from cortex.core.parsing import normalize_track as t
+    assert t("Oracle/Database") == t("Database") == "database"
+    assert t("AI/Automation") == t("AI") == "ai"
+    assert t("Data Engineering") == t("Data") == t("Data+AI") == "data"

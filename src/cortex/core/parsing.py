@@ -52,11 +52,11 @@ def normalize_company(name: str) -> str:
 
 def normalize_track(raw: str) -> str:
     r = (raw or "").strip().lower()
-    if r.startswith("database"):
+    if r.startswith("database") or r.startswith("oracle") or "dba" in r:   # 'Database', 'Oracle/Database'
         return "database"
-    if r == "ai":
+    if r == "ai" or r.startswith("ai/") or r.startswith("ai "):         # 'AI', 'AI/Automation'
         return "ai"
-    return "data"      # 'Data' and hybrid 'Data+AI' score on the data base
+    return "data"      # 'Data', 'Data Engineering' and hybrid 'Data+AI' score on the data base
 
 
 def normalize_source(raw: str) -> str:
