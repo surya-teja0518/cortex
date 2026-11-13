@@ -1,0 +1,37 @@
+# Workday field map for `cortex workday-fill`. Workday marks inputs with data-automation-id attributes.
+# These ids are Workday's common ones, NOT verified against a live tenant from the build environment.
+# If a field isn't filled: run `cortex workday-fill <job_id> --inspect`, find the id it prints for that field,
+# and add it to the list below. No code change needed. Tenants differ; several ids per field are fine.
+
+simple:                       # one per page
+  first_name: [legalNameSection_firstName]
+  last_name: [legalNameSection_lastName]
+  email: [email]
+  phone: [phone-number, phoneNumber]
+  city: [addressSection_city]
+  linkedin: [linkedinQuestion, linkedIn]
+
+work_experience:              # repeated blocks; each block's own id starts with the prefix
+  container_prefix: workExperience-
+  fields:
+    title: [jobTitle]
+    company: [company]
+    location: [location]
+    description: [description]
+  dates:                      # section id -> its month / year inputs
+    start: [startDate, formField-startDate]
+    end: [endDate, formField-endDate]
+  month_ids: [dateSectionMonth-input]
+  year_ids: [dateSectionYear-input]
+
+education:
+  container_prefix: education-
+  fields:
+    school: [school]
+  dates:
+    start: [firstYearAttended, formField-firstYearAttended]
+    end: [lastYearAttended, formField-lastYearAttended]
+  month_ids: [dateSectionMonth-input]
+  year_ids: [dateSectionYear-input]
+
+resume_upload: [file-upload-input-ref, file-upload-input]

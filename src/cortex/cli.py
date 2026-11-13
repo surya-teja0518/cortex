@@ -301,6 +301,62 @@ def cmd_packet(a, uid):
     print(f"job {a.job_id}: packet at {st['packet_path']}  (CORTEX never submits: apply yourself)")
 
 
+def cmd_workday_fill(a, uid):
+    """Type your details into a Workday application you have open. Never clicks anything, never submits."""
+    import json
+    from pathlib import Path
+
+    from cortex.agents.packet import load_contact
+    from cortex.agents.workday import load_answers
+    from cortex.agents.workday_browser import open_browser
+    from cortex.agents.workday_fill import (
+        build_plan,
+        inspect,
+        is_workday,
+        load_fmap,
+        run,
+    )
+    from cortex.core.resume import TailoredResume, load_master
+    from cortex.db.schema import PacketRow, TailoredResumeRow
+
+    ses = _session()
+    job = ses.get(JobRow, a.job_id)
+    if job is None or job.user_id != uid:
+        raise SystemExit("job not found")
+    start = a.url or (job.url if is_workday(job.url or "") else None)
+    if a.url and not is_workday(a.url):
+        raise SystemExit("--url must be an https Workday link (*.myworkdayjobs.com / *.myworkday.com / *.workday.com)")
+    plan = None
+    if not a.inspect:
+        tr = ses.scalars(select(TailoredResumeRow).where(
+            TailoredResumeRow.user_id == uid, TailoredResumeRow.job_id == a.job_id,
+            TailoredResumeRow.status == "approved").order_by(TailoredResumeRow.id.desc())).first()
+        if tr is None:
+            raise SystemExit("no approved resume for this job: run `cortex tailor` and approve it in the dashboard first")
+        pk = ses.scalars(select(PacketRow.path).where(PacketRow.user_id == uid, PacketRow.job_id == a.job_id)
+                         .order_by(PacketRow.id.desc())).first()
+        plan = build_plan(load_master(a.master), TailoredResume.model_validate(json.loads(tr.resume_json)),
+                          load_contact(a.contact), load_answers(), Path(pk) / "resume.pdf" if pk else None)
+    pw, browser, page = open_browser(start)
+    try:
+        if a.inspect:
+            input("Open the Workday page you want to map, then press Enter here... ")
+            print("\n".join(inspect(page)))
+            return
+        print("Log in and open the application in the browser window."
+              + ("" if start else " (Paste the Workday apply link into its address bar.)"))
+        print("CORTEX only types into EMPTY fields on Workday pages. It never clicks Next or Submit: review every "
+              "page yourself. Close the browser window when you're done.")
+        st = run(page, plan, load_fmap(a.fields), on_fill=lambda k: print(f"  filled {'/'.join(map(str, k))}"))
+        AuditLog().log("workday_fill", "session", user_id=uid, job_id=a.job_id, filled=st.filled)
+        print(f"done: {st.filled} fields filled. Submit was (and always is) yours.")
+    finally:
+        try:
+            browser.close()
+        finally:
+            pw.stop()
+
+
 def cmd_track(a, uid):
     """Record what happened: applied / interview / offer / rejected. Forward-only, audit-logged."""
     from datetime import date
@@ -402,6 +458,14 @@ def main(argv=None):
     co.add_argument("--dry-run", action="store_true", help="check and report; change nothing")
     co.add_argument("--limit", type=int, default=None, help="max jobs this run (capped by config max_per_run)")
     co.set_defaults(fn=cmd_check_open)
+    wf = sub.add_parser("workday-fill", help="type your details into an open Workday application (never submits)")
+    wf.add_argument("job_id", type=int)
+    wf.add_argument("--url", default=None, help="the Workday apply link (https://<company>.wd*.myworkdayjobs.com/...)")
+    wf.add_argument("--inspect", action="store_true", help="print the page's field ids (no values) to fix the map")
+    wf.add_argument("--fields", default="workday_fields.yaml")
+    wf.add_argument("--master", default="master_resume.yaml")
+    wf.add_argument("--contact", default="contact.yaml")
+    wf.set_defaults(fn=cmd_workday_fill)
     pl = sub.add_parser("pull", help="read SYNAPSE's recent Apify datasets (APIFY_TOKEN in .env); never starts runs")
     pl.add_argument("--dry-run", action="store_true", help="show what would be added; save nothing")
     pl.set_defaults(fn=cmd_pull)
