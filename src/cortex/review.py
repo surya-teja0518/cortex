@@ -1,7 +1,8 @@
 """Review-queue queries (UI-agnostic so they are testable and reusable by the dashboard)."""
 import json
+from datetime import date, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from cortex.agents.tracker import FUNNEL
 from cortex.core.audit import AuditLog
@@ -10,8 +11,16 @@ from cortex.db.schema import JobRow, SkipRow, TailoredResumeRow
 
 def review_queue(session, user_id: str, *, tracks=None, city: str = "", min_synapse: int = 0,
                  include_gated: bool = False, include_dups: bool = False, statuses=("to_apply",),
-                 include_skipped: bool = False, limit: int = 500) -> list[dict]:
+                 include_skipped: bool = False, limit: int = 500, max_age_days: int | None = None,
+                 today: date | None = None) -> list[dict]:
+    """max_age_days hides postings older than that (posted date, else date added). Most postings close within
+    weeks and LinkedIn can't be checked automatically (no LinkedIn scraping), so age is the honest proxy.
+    Hiding is view-only: nothing is marked closed. Jobs with neither date are kept."""
     q = select(JobRow).where(JobRow.user_id == user_id, JobRow.status.in_(statuses))
+    if max_age_days is not None:
+        cutoff = (today or date.today()) - timedelta(days=max_age_days)  # noqa: DTZ011 (local date)
+        q = q.where(func.coalesce(JobRow.posted, JobRow.date_added).is_(None)
+                    | (func.coalesce(JobRow.posted, JobRow.date_added) >= cutoff))
     if not include_skipped:
         q = q.where(JobRow.id.not_in(select(SkipRow.job_id).where(SkipRow.user_id == user_id)))
     if tracks:
@@ -31,7 +40,7 @@ def review_queue(session, user_id: str, *, tracks=None, city: str = "", min_syna
     out = []
     for r in rows:
         o = llm.get(r.id)
-        out.append(dict(id=r.id, company=r.company, role=r.title, track=r.track,
+        out.append(dict(id=r.id, company=r.company, role=r.title, track=r.track, posted=r.posted or r.date_added,
                         llm=o.score if o else None, llm_band=o.band if o else None, source=r.source,
                         synapse=r.synapse_score, synapse_p=r.synapse_priority,
                         cortex=r.score, cortex_band=r.band, location=r.location,

@@ -76,6 +76,12 @@ tracker:
   followup_days: 7           # flag applied/interview jobs with no update for this many days
   stale_days: 30             # ...up to this many; older ones: `cortex close-stale` -> no_response
 
+# Dashboard hides to_apply postings older than this (posted date, else date added): most close within weeks and
+# LinkedIn can't be checked automatically. View-only, nothing is marked closed; a sidebar box shows them again.
+# ATS jobs are closed EXACTLY: gone from the company's board on `cortex fetch` -> status closed.
+freshness:
+  max_age_days: 30
+
 # `cortex daily` (pull -> fetch -> score -> digest), run by launchd: `cortex schedule --install`.
 daily:
   hour: 9            # local time on the Mac; launchd runs a missed time when the Mac wakes

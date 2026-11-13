@@ -9,6 +9,7 @@ from cortex.core.audit import AuditLog
 from cortex.core.secrets import get_secret
 from cortex.db.schema import get_session
 from cortex.graph import Deps, build_graph, open_checkpointer, submit_decision
+from cortex.core.config import load_config
 from cortex.review import pending_approvals, record_skip, review_queue
 
 st.set_page_config(page_title="CORTEX", layout="wide")
@@ -30,11 +31,14 @@ with st.sidebar:
     min_syn = st.slider("Min SYNAPSE score", 0, 100, 70)
     show_gated = st.checkbox("Include gated (title/YOE)", False)
     show_dups = st.checkbox("Include possible duplicates", False)
+    _max_age = load_config().get("freshness", {}).get("max_age_days", 30)
+    show_old = st.checkbox(f"Include postings older than {_max_age} days (likely closed)", False)
     statuses = st.multiselect("Status", ["to_apply", "applied", "closed", "not_accepting", "exp_mismatch"],
                               default=["to_apply"])
 
 rows = review_queue(session, uid, tracks=tracks, city=city, min_synapse=min_syn,
-                    include_gated=show_gated, include_dups=show_dups, statuses=tuple(statuses))
+                    include_gated=show_gated, include_dups=show_dups, statuses=tuple(statuses),
+                    max_age_days=None if show_old else _max_age)
 st.caption(f"{len(rows)} jobs. Applications are never auto-submitted: open the link and apply yourself.")
 event = st.dataframe(rows, use_container_width=True, hide_index=True,
                      on_select="rerun", selection_mode="multi-row",

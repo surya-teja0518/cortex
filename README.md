@@ -78,7 +78,9 @@ escaped so LLM output can't inject PDF links). You still apply yourself.
 ATS source: `cortex fetch` reads companies' public Greenhouse / Lever / Ashby job-board JSON (no login, no key),
 keeps postings matching title + India-location filters, then runs the same sanitizer (injection-flagged jobs go to
 manual review), gates, deterministic score and cross-source dedupe. Slugs are validated, redirects are not followed,
-responses are size-capped, and a re-fetch never changes a job's status. Parsers are tested against fixtures built
+responses are size-capped, and a re-fetch never changes a job you acted on. A to_apply job that disappears from its
+company's board is marked closed (an exact signal). LinkedIn postings are never checked automatically (no LinkedIn
+scraping); the review queue hides postings older than `freshness.max_age_days` instead, view-only. Parsers are tested against fixtures built
 from the vendors' documented shapes; live responses are checked with `cortex fetch --dry-run` on the developer's machine.
 Daily run: `cortex daily` = fetch -> LLM-score new jobs -> email digest, scheduled with a launchd job on the Mac
 (local, because the DB and resume never leave it). Each step fails independently and the failure is reported in the

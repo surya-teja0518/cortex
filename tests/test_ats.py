@@ -235,3 +235,40 @@ def test_cli_fetch(ses, cfg, tmp_path, monkeypatch, capsys):
     (tmp_path / "config.yaml").write_text(yaml.safe_dump(cfg))
     with pytest.raises(SystemExit, match="no boards configured"):
         main(["fetch"])
+
+
+# ---------- closed detection (exact: gone from the board) ----------
+
+def test_jobs_gone_from_board_are_closed_but_never_applied_ones(ses, cfg):
+    run(ses, cfg, ok_client())
+    j101 = ses.scalar(select(JobRow).where(JobRow.external_id == "acme:101"))
+    j102 = ses.scalar(select(JobRow).where(JobRow.external_id == "acme:102"))
+    j102.status = "applied"
+    ses.commit()
+    smaller = {"jobs": [x for x in GH["jobs"] if not (isinstance(x, dict) and x.get("id") in (101, 102))]}
+    res = {r.board: r for r in run(ses, cfg, transport({"boards/acme": smaller, "postings/beta": LEVER,
+                                                         "job-board/gamma": ASHBY}))}
+    assert res["acme"].closed == 1
+    ses.refresh(j101)
+    ses.refresh(j102)
+    assert j101.status == "closed" and j101.status_raw.startswith("auto: gone from greenhouse board")
+    assert j102.status == "applied"                                              # his action: untouched
+
+
+def test_empty_board_or_error_closes_nothing(ses, cfg):
+    run(ses, cfg, ok_client())
+    for client in (transport({"boards/acme": {"jobs": []}, "postings/beta": LEVER, "job-board/gamma": ASHBY}),
+                   transport({"boards/acme": lambda: httpx.Response(500), "postings/beta": LEVER,
+                              "job-board/gamma": ASHBY})):
+        res = {r.board: r for r in run(ses, cfg, client)}
+        assert res["acme"].closed == 0
+    assert ses.scalar(select(JobRow).where(JobRow.external_id == "acme:101")).status == "to_apply"
+
+
+def test_dry_run_reports_but_does_not_close(ses, cfg):
+    run(ses, cfg, ok_client())
+    smaller = {"jobs": [GH["jobs"][1]]}
+    res = {r.board: r for r in run(ses, cfg, transport({"boards/acme": smaller, "postings/beta": LEVER,
+                                                         "job-board/gamma": ASHBY}), dry_run=True)}
+    assert res["acme"].closed == 1
+    assert ses.scalar(select(JobRow).where(JobRow.external_id == "acme:101")).status == "to_apply"

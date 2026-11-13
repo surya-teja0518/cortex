@@ -38,7 +38,7 @@ def cmd_fetch(a, uid):
             print(f"{head}: ERROR {r.error}")
             continue
         print(f"{head}: fetched={r.fetched} relevant={r.kept} new={r.inserted} updated={r.updated} "
-              f"gated={r.gated} flagged={r.flagged}")
+              f"closed={r.closed} gated={r.gated} flagged={r.flagged}")
         for t, loc, band in r.new_jobs[:10]:
             print(f"    + [{band}] {t} | {loc}")
     total = sum(r.inserted for r in res)
