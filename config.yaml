@@ -63,6 +63,10 @@ llm:
   # Fields left out of the scorer prompt. stack_fit is SYNAPSE's own fit verdict; the 2026-11-02 ablation
   # showed the LLM ranks no worse without it (62.4 vs 60.8 mean pct rank), so CORTEX doesn't depend on it.
   scorer_exclude_fields: [stack_fit]
+  # Scorer prompt gets a SKILLS-ONLY profile built from master_resume.yaml: years (as your resume states them),
+  # target roles, skill names. Never employers, metrics, bullets or contact details (Surya's decision 2026-11-13).
+  # false = the old generic "data engineer / Oracle DBA, ~4 years" line. Changing it re-scores (new prompt hash).
+  scorer_profile: true
 
 # Tailoring. original (default): copy your own resume PDF for the job's domain into the packet; nothing generated.
 # track: render the curated track from master_resume.yaml with relevant bullets first. llm: the Ollama rewrite tailor.

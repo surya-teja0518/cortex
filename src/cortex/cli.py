@@ -128,7 +128,8 @@ def cmd_eval(a, uid):
         only = None if a.provider == "route" else a.provider
         router = build_route("scorer", cfg, audit, schema=LLMScore.model_json_schema(), only=only)
         # The router rate-limits per provider; a second limiter here would only slow every call down.
-        scorer = LLMScorer(router, NoLimit(), audit, cfg["scoring"]["bands"], exclude_fields=excl)
+        scorer = LLMScorer(router, NoLimit(), audit, cfg["scoring"]["bands"], exclude_fields=excl,
+                           profile=_profile(cfg, use=False if a.no_profile else None))
 
     def progress(done, total, live, cached, unscored, secs):
         if done % 10 and done != total:
@@ -142,27 +143,53 @@ def cmd_eval(a, uid):
         raise SystemExit(f"eval stopped: {e}") from None
 
 
-def _build_scorer(cfg: dict, audit, provider: str = "route"):
+def _profile(cfg: dict, master_path: str = "master_resume.yaml", use: bool | None = None) -> str | None:
+    """Skills-only candidate profile for the cloud scorer (config llm.scorer_profile), or None for the generic one."""
+    from pathlib import Path
+
+    from cortex.agents.scorer import candidate_profile
+    from cortex.core.resume import load_master
+    if not (cfg["llm"].get("scorer_profile", False) if use is None else use):
+        return None
+    if not Path(master_path).exists():
+        print(f"note: {master_path} not found; scoring with the generic profile", file=sys.stderr)
+        return None
+    return candidate_profile(load_master(master_path))
+
+
+def _build_scorer(cfg: dict, audit, provider: str = "route", profile: str | None = None):
     from cortex.agents.scorer import LLMScore, LLMScorer
     from cortex.core.ratelimit import NoLimit
     from cortex.llm.router import build_route
     excl = frozenset(cfg["llm"].get("scorer_exclude_fields", []))
     router = build_route("scorer", cfg, audit, schema=LLMScore.model_json_schema(),
                          only=None if provider == "route" else provider)
-    return LLMScorer(router, NoLimit(), audit, cfg["scoring"]["bands"], exclude_fields=excl)
+    return LLMScorer(router, NoLimit(), audit, cfg["scoring"]["bands"], exclude_fields=excl, profile=profile)
+
+
+def _compute_fits(ses, uid, master_path: str = "master_resume.yaml") -> int:
+    from pathlib import Path
+
+    from cortex.agents.batch_score import compute_fits
+    from cortex.core.resume import load_master
+    from cortex.core.skillfit import SkillMatcher
+    if not Path(master_path).exists():
+        return 0
+    return compute_fits(ses, uid, SkillMatcher(load_master(master_path)))
 
 
 def cmd_score(a, uid):
     """LLM-score new jobs (to_apply, ungated, not dup, not flagged, not scored yet). Newest first."""
     from cortex.agents.batch_score import score_new
-    cfg, audit = load_config(a.config), AuditLog()
-    scorer = _build_scorer(cfg, audit, a.provider)
+    cfg, audit, ses = load_config(a.config), AuditLog(), _session()
+    print(f"skill-fit computed for {_compute_fits(ses, uid)} new/changed jobs (local, no LLM)")
+    scorer = _build_scorer(cfg, audit, a.provider, profile=_profile(cfg))
     limit = a.limit or cfg.get("daily", {}).get("score_limit", 100)
 
     def progress(i, n):
         if i % 10 == 0 or i == n:
             print(f"  {i}/{n}", file=sys.stderr, flush=True)
-    r = score_new(_session(), uid, scorer, limit=limit, progress=progress)
+    r = score_new(ses, uid, scorer, limit=limit, progress=progress)
     print(f"candidates={r.candidates} scored={r.scored} kept_rule_score={r.unscored}"
           + (f"\nstopped early: {r.stopped_early}" if r.stopped_early else ""))
 
@@ -211,7 +238,9 @@ def cmd_daily(a, uid):
         pull = lambda s: pull_all(s, cfg, uid, audit=audit)
     score = None
     if not a.no_score:
-        score = lambda s: score_new(s, uid, _build_scorer(cfg, audit), limit=dcfg.get("score_limit", 100))
+        def score(s):
+            _compute_fits(s, uid)
+            return score_new(s, uid, _build_scorer(cfg, audit, profile=_profile(cfg)), limit=dcfg.get("score_limit", 100))
     print(f"[{datetime.now():%Y-%m-%d %H:%M}] cortex daily")  # noqa: DTZ005 (local time for the log)
     res = run_daily(ses, cfg, uid, datetime.now().date(), fetch=fetch, score=score, pull=pull,  # noqa: DTZ005
                     digest=_digest_fn(cfg, uid, audit, a.dry_run), audit=audit)
@@ -507,6 +536,8 @@ def main(argv=None):
     e.add_argument("--exclude-fields", default=None,
                    help="job fields left out of the LLM prompt (default: llm.scorer_exclude_fields in config, "
                         "currently stack_fit); 'none' = include every field")
+    e.add_argument("--no-profile", action="store_true",
+                   help="score with the generic candidate line instead of your skills profile (ablation)")
     e.set_defaults(fn=cmd_eval)
     t = sub.add_parser("tailor", help="tailor a resume for one job; pauses for approval in the dashboard")
     t.add_argument("job_id", type=int)

@@ -128,7 +128,7 @@ def deterministic_result(r: JobRow) -> ScoreResult:
 def llm_score_cached(session, scorer: LLMScorer, r: JobRow, user_id: str) -> tuple[ScorerOutcome, bool]:
     """Return (outcome, cache_hit). Only successful LLM scores are cached; fallbacks retry next run."""
     inp = ScoringInput.from_row(r)
-    prepared = render_job(inp, scorer.exclude_fields)   # excluded fields change the prompt, hence the cache key
+    prepared = scorer.render(inp)   # excluded fields / profile change the prompt, hence the cache key
     sha = hashlib.sha256(prepared[0].encode()).hexdigest()
     key = (LLMScoreCacheRow.user_id == user_id, LLMScoreCacheRow.job_id == r.id,
            LLMScoreCacheRow.provider == scorer.provider.name, LLMScoreCacheRow.prompt_sha256 == sha)
