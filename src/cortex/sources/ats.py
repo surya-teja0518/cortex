@@ -245,6 +245,7 @@ class BoardResult:
     gated: int = 0
     flagged: int = 0
     error: str | None = None
+    closed: int = 0          # to_apply jobs from this board that are no longer on it
     new_jobs: list[tuple[str, str, str]] = field(default_factory=list)   # (title, location, band) for display
 
 
@@ -304,6 +305,22 @@ def upsert(session, vals: dict, *, own_prefix: str, dry_run: bool) -> str:
     return "unchanged"
 
 
+def close_missing(session, user_id: str, ats: str, board: str, live_ids: set[str], today: date, *,
+                  dry_run: bool = False) -> int:
+    """A job that is gone from the company's own board is closed: an exact signal, unlike any guess.
+    Only to_apply rows this source created; anything Surya acted on (applied, approved...) is never touched."""
+    rows = session.scalars(select(JobRow).where(
+        JobRow.user_id == user_id, JobRow.source == ats, JobRow.status == "to_apply",
+        JobRow.external_id.startswith(f"{board}:"), JobRow.batch.startswith("ats-")))
+    n = 0
+    for r in rows:
+        if r.external_id.split(":", 1)[1] not in live_ids:
+            n += 1
+            if not dry_run:
+                r.status, r.status_raw = "closed", f"auto: gone from {ats} board {today.isoformat()}"
+    return n
+
+
 def fetch_all(session, cfg: dict, user_id: str, *, client: httpx.Client | None = None,
               limiter: RateLimiter | NoLimit | None = None, audit: AuditLog | None = None,
               only: str | None = None, dry_run: bool = False, today: date | None = None) -> list[BoardResult]:
@@ -348,9 +365,13 @@ def fetch_all(session, cfg: dict, user_id: str, *, client: httpx.Client | None =
                     res.new_jobs.append((vals["title"], vals["location"], vals["band"]))
                 else:
                     res.updated += 1
+            if postings:   # an empty board is more likely a glitch than every job closing at once: close nothing
+                res.closed = close_missing(session, user_id, ats, board, {p.external_id for p in postings}, today,
+                                           dry_run=dry_run)
             if audit:
                 audit.log("ats_source", "fetch", user_id=user_id, ats=ats, board=board, fetched=res.fetched,
-                          kept=res.kept, inserted=res.inserted, updated=res.updated, dry_run=dry_run)
+                          kept=res.kept, inserted=res.inserted, updated=res.updated, closed=res.closed,
+                          dry_run=dry_run)
     finally:
         if own:
             client.close()

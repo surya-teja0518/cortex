@@ -293,3 +293,16 @@ def test_review_queue_ranks_llm_scored_first(ses, tmp_path):
     rows = review_queue(ses, "u1")
     assert [(r["id"], r["llm"]) for r in rows] == [(b.id, 91), (c.id, 70), (a.id, None)]
     assert rows[0]["llm_band"] == "P0"
+
+
+def test_review_queue_hides_old_postings_view_only(ses):
+    from cortex.review import review_queue
+    new = add(ses, 1, posted=date(2026, 11, 1))
+    old = add(ses, 2, posted=date(2026, 9, 1))
+    added_recent = add(ses, 3, date_added=date(2026, 11, 5))          # no posted date: falls back to date added
+    undated = add(ses, 4)
+    ids = {r["id"] for r in review_queue(ses, "u1", max_age_days=30, today=TODAY)}
+    assert ids == {new.id, added_recent.id, undated.id}
+    assert old.id in {r["id"] for r in review_queue(ses, "u1", today=TODAY)}
+    ses.refresh(old)
+    assert old.status == "to_apply"                                    # hiding never changes status
