@@ -65,6 +65,22 @@ def cmd_pull(a, uid):
     print(f"{total} new jobs" + (" (dry run: nothing saved)" if a.dry_run else ""))
 
 
+def cmd_check_open(a, uid):
+    """Check whether recent to_apply LinkedIn jobs are still open (public no-login page; opt-in, rate-limited)."""
+    from cortex.sources.linkedin_status import check_open
+    cfg = load_config(a.config)
+    try:
+        r = check_open(_session(), cfg, uid, dry_run=a.dry_run, limit=a.limit, audit=AuditLog())
+    except PermissionError as e:
+        raise SystemExit(str(e)) from None
+    print(f"candidates={r.candidates} checked={r.checked} open={r.open} closed={r.closed} unclear={r.unknown}")
+    for i, c, t in r.closed_jobs[:20]:
+        print(f"  closed: [{i}] {c} | {t}")
+    if r.stopped:
+        print(f"STOPPED: {r.stopped}")
+    print("dry run: nothing changed" if a.dry_run else f"{r.closed} marked not_accepting")
+
+
 def cmd_stats(a, uid):
     ses = _session()
     for label, col in (("status", JobRow.status), ("track", JobRow.track), ("cortex band", JobRow.band)):
@@ -382,6 +398,10 @@ def main(argv=None):
     i = sub.add_parser("import", help="import SYNAPSE tracker CSV exports (master first, then batches)")
     i.add_argument("files", nargs="+")
     i.set_defaults(fn=cmd_import)
+    co = sub.add_parser("check-open", help="are recent LinkedIn to_apply jobs still open? (opt-in, slow on purpose)")
+    co.add_argument("--dry-run", action="store_true", help="check and report; change nothing")
+    co.add_argument("--limit", type=int, default=None, help="max jobs this run (capped by config max_per_run)")
+    co.set_defaults(fn=cmd_check_open)
     pl = sub.add_parser("pull", help="read SYNAPSE's recent Apify datasets (APIFY_TOKEN in .env); never starts runs")
     pl.add_argument("--dry-run", action="store_true", help="show what would be added; save nothing")
     pl.set_defaults(fn=cmd_pull)
