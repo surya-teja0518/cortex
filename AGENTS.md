@@ -35,6 +35,7 @@ Sequential LangGraph state machine, not a parallel hub:
 - Every LLM output must validate against a Pydantic model; invalid → retry/fallback, never pass through.
 - No secrets in code, logs, commits, or error messages. `.env` is gitignored.
 - No LinkedIn automation, no auto-apply, no scraping behind logins (account-ban + ToS risk).
+  - EXCEPTION (Surya's decision, 2026-11-13): `cortex check-open` may read LinkedIn's PUBLIC no-login job page to see whether a to_apply job is still open. Limits, enforced in code: opt-in (`linkedin_check.enabled`), never in `cortex daily`, no login/cookies/account, only to_apply jobs <= 30 days old, <= 60 per run, >= 3 s (default 6 s + jitter) between requests, stops at the first 429/999/403/redirect, only clear "no longer accepting" or 404/410 closes a job. Accepted risk: LinkedIn may throttle/CAPTCHA his home IP. Anything beyond this (logged-in pages, search, applying) stays forbidden.
 - Audit log is append-only and hash-chained; tampering must fail `verify()`.
 - Dashboard binds to localhost; add auth before exposing anywhere.
 - Never invent resume content. Truth Guard is the backstop, not the excuse.
@@ -114,7 +115,8 @@ JOB FRESHNESS (branch feat/job-freshness, 2026-11-13). Surya asked for an open/c
 - NO LinkedIn page checks (1154 of 1197 jobs are LinkedIn URLs): that is direct LinkedIn scraping, forbidden above (ban/ToS risk). Possible later: a paid Apify run that re-checks job URLs, only if Surya amends this file.
 - ATS: `close_missing` in sources/ats.py: on a successful, non-empty board fetch, to_apply rows this source created whose posting is gone -> status closed, status_raw "auto: gone from <ats> board <date>" (exact signal). Never touches applied/approved/etc.; empty board or error closes nothing; dry-run reports `closed=` only.
 - Everything else: review queue hides to_apply postings older than config `freshness.max_age_days` (30) by posted date, else date added (view-only, nothing marked closed; jobs with no date stay; sidebar checkbox shows them). Queue rows gain a `posted` column.
-NOT built yet: Workday fill helper (undecided).
+LINKEDIN OPEN CHECK (branch feat/linkedin-open-check, 2026-11-13): `sources/linkedin_status.py` + `cortex check-open [--dry-run] [--limit]` (limits: see the security-rule exception). Guest endpoint `www.linkedin.com/jobs-guest/jobs/api/jobPosting/<id>`; "No longer accepting applications" or 404/410 -> status not_accepting, status_raw "auto: LinkedIn says closed <date>"; unclear pages stay to_apply. Page markers NOT verified (LinkedIn unreachable from the cloud env, and not to be hit from there): first run = `cortex check-open --dry-run` on the Mac.
+NOT built yet: Workday fill helper (APPROVED by Surya 2026-11-13: he logs in himself, it fills and never submits; in progress).
 
 ## Build order (each step must be usable on its own)
 1. **MVP (DONE, v0.2):** SYNAPSE import → dedupe → gates → deterministic score → Streamlit review list. Next for this step: import real Batch016 export, then the older batches (master first).

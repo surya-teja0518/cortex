@@ -81,6 +81,14 @@ tracker:
 # ATS jobs are closed EXACTLY: gone from the company's board on `cortex fetch` -> status closed.
 freshness:
   max_age_days: 30
+# `cortex check-open`: is a LinkedIn job still open? Reads LinkedIn's PUBLIC no-login job page from your Mac.
+# A deliberate exception to "no LinkedIn scraping" (Surya, 2026-11-13; AGENTS.md). Off by default. Risk: LinkedIn
+# may throttle or CAPTCHA your home IP; the run stops at the first push-back. Never part of `cortex daily`.
+linkedin_check:
+  enabled: false
+  max_per_run: 60        # jobs per run (hard cap)
+  delay_seconds: 6       # between requests, plus random jitter; never below 3
+  max_age_days: 30       # only check postings newer than this; older ones are hidden in the queue anyway
 
 # `cortex daily` (pull -> fetch -> score -> digest), run by launchd: `cortex schedule --install`.
 daily:
