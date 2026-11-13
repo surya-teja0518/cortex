@@ -4,8 +4,9 @@ This is a deliberate, narrow exception to "no direct LinkedIn scraping", made by
 AGENTS.md, LINKEDIN OPEN CHECK). The limits are what make it acceptable, so they are enforced in code:
 - Off unless config `linkedin_check.enabled: true`. Never part of `cortex daily`.
 - No login, no cookies, no account: plain anonymous GET of the public guest endpoint. Nothing is posted.
-- Only to_apply jobs from source linkedin, posted (else added) within `max_age_days`, newest first,
-  at most `max_per_run` per run, one request every `delay_seconds` (+ jitter).
+- Only to_apply jobs from source linkedin, posted (else added) within `max_age_days`, highest LLM score first,
+  not checked in the last `recheck_days`, at most `max_per_run` per run, one request every `delay_seconds`
+  (+ jitter). First real run (2026-11-13): LinkedIn sent 429 after 23 requests at ~6 s, so defaults are 20 / 10 s.
 - The FIRST sign of throttling (429, 999, 403, any redirect such as an authwall) stops the whole run.
 - Only a clear "No longer accepting applications" or a 404/410 marks a job closed; anything unclear stays
   to_apply. Closed jobs become not_accepting with status_raw "auto: ..." (same status the sheet uses).
@@ -24,7 +25,7 @@ import httpx
 from sqlalchemy import func, select
 
 from cortex.core.audit import AuditLog
-from cortex.db.schema import JobRow
+from cortex.db.schema import JobCheckRow, JobRow
 
 GUEST_URL = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}"
 MAX_BYTES = 3_000_000
@@ -74,13 +75,29 @@ class CheckResult:
     closed_jobs: list[tuple[int, str, str]] = field(default_factory=list)   # id, company, title
 
 
-def candidates(session, user_id: str, today: date, max_age_days: int, limit: int) -> list[JobRow]:
+def candidates(session, user_id: str, today: date, max_age_days: int, limit: int,
+               recheck_days: int = 3) -> list[JobRow]:
+    """The jobs worth spending today's small budget on: highest LLM score first (the ones he'd apply to), then
+    newest. Skips jobs checked within `recheck_days`, so consecutive runs move through the queue."""
+    from cortex.agents.batch_score import latest_llm_scores
     cutoff = today - timedelta(days=max_age_days)
     age = func.coalesce(JobRow.posted, JobRow.date_added)
-    q = (select(JobRow).where(JobRow.user_id == user_id, JobRow.source == "linkedin", JobRow.status == "to_apply",
-                              JobRow.dup_of_id.is_(None), age.is_not(None), age >= cutoff)
-         .order_by(age.desc(), JobRow.id.desc()).limit(limit))
-    return list(session.scalars(q))
+    recent = select(JobCheckRow.job_id).where(JobCheckRow.user_id == user_id,
+                                              JobCheckRow.checked_at > today - timedelta(days=recheck_days))
+    rows = list(session.scalars(select(JobRow).where(
+        JobRow.user_id == user_id, JobRow.source == "linkedin", JobRow.status == "to_apply",
+        JobRow.dup_of_id.is_(None), age.is_not(None), age >= cutoff, JobRow.id.not_in(recent))))
+    llm = latest_llm_scores(session, user_id, [r.id for r in rows])
+    rows.sort(key=lambda r: (-(llm[r.id].score if r.id in llm else -1), -(r.posted or r.date_added).toordinal(), -r.id))
+    return rows[:limit]
+
+
+def _record(session, user_id: str, job_id: int, verdict: str, today: date) -> None:
+    row = session.scalar(select(JobCheckRow).where(JobCheckRow.user_id == user_id, JobCheckRow.job_id == job_id))
+    if row is None:
+        session.add(JobCheckRow(user_id=user_id, job_id=job_id, verdict=verdict, checked_at=today))
+    else:
+        row.verdict, row.checked_at = verdict, today
 
 
 def check_open(session, cfg: dict, user_id: str, *, today: date | None = None, client: httpx.Client | None = None,
@@ -91,9 +108,10 @@ def check_open(session, cfg: dict, user_id: str, *, today: date | None = None, c
         raise PermissionError("linkedin_check is disabled: set linkedin_check.enabled: true in config.yaml "
                               "(read the trade-off in AGENTS.md first)")
     today = today or date.today()  # noqa: DTZ011 (local date)
-    rows = candidates(session, user_id, today, int(c.get("max_age_days", 30)),
-                      min(int(limit or c.get("max_per_run", 60)), int(c.get("max_per_run", 60))))
-    delay = max(float(c.get("delay_seconds", 6)), 3.0)          # never faster than one request per 3s
+    cap = int(c.get("max_per_run", 20))
+    rows = candidates(session, user_id, today, int(c.get("max_age_days", 30)), min(int(limit or cap), cap),
+                      int(c.get("recheck_days", 3)))
+    delay = max(float(c.get("delay_seconds", 10)), 3.0)          # never faster than one request per 3s
     res = CheckResult(candidates=len(rows))
     own = client is None
     client = client or httpx.Client(headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"})
@@ -108,6 +126,8 @@ def check_open(session, cfg: dict, user_id: str, *, today: date | None = None, c
                 break
             res.checked += 1
             setattr(res, verdict, getattr(res, verdict) + 1)
+            if not dry_run and verdict != "unknown":
+                _record(session, user_id, r.id, verdict, today)
             if verdict == "closed":
                 res.closed_jobs.append((r.id, r.company, r.title))
                 if not dry_run:

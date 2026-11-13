@@ -105,3 +105,38 @@ def test_dry_run_changes_nothing(ses):
                    client=client({"5000001": (200, CLOSED_HTML)}), dry_run=True)
     ses.refresh(j)
     assert r.closed == 1 and j.status == "to_apply"
+
+
+def test_rotates_through_queue_and_dry_run_records_nothing(ses):
+    from cortex.db.schema import JobCheckRow
+    for n in range(1, 6):
+        add(ses, f"600000{n}")
+    cfg = {"linkedin_check": {**CFG["linkedin_check"], "max_per_run": 2}}
+    pages = {f"600000{n}": (200, OPEN_HTML) for n in range(1, 6)}
+    check_open(ses, cfg, "u1", today=TODAY, sleep=lambda s: None, client=client(pages), dry_run=True)
+    assert ses.query(JobCheckRow).count() == 0
+    seen = []
+    for _ in range(3):
+        calls = []
+        check_open(ses, cfg, "u1", today=TODAY, sleep=lambda s: None, client=client(pages, calls))
+        seen += [c.url.path.rsplit("/", 1)[-1] for c in calls]
+    assert sorted(seen) == [f"600000{n}" for n in range(1, 6)]               # 2 + 2 + 1, no repeats
+    from datetime import timedelta
+    calls = []
+    check_open(ses, cfg, "u1", today=TODAY + timedelta(days=3), sleep=lambda s: None, client=client(pages, calls))
+    assert len(calls) == 2                                                    # 3 days later: due again
+
+
+def test_highest_llm_score_checked_first(ses):
+    import json
+
+    from cortex.db.schema import LLMScoreCacheRow
+    low, high, unscored = add(ses, "7000001"), add(ses, "7000002", posted=date(2026, 10, 20)), add(ses, "7000003")
+    for j, sc in ((low, 60), (high, 92)):
+        ses.add(LLMScoreCacheRow(user_id="u1", job_id=j.id, provider="p", prompt_sha256="s",
+                                 result_json=json.dumps({"score": sc, "band": "P2", "reasons": [], "source": "llm"})))
+    ses.commit()
+    calls = []
+    check_open(ses, CFG, "u1", today=TODAY, sleep=lambda s: None, client=client({}, calls))
+    assert [c.url.path.rsplit("/", 1)[-1] for c in calls] == ["7000002", "7000001", "7000003"]
+    assert unscored.id

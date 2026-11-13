@@ -152,6 +152,18 @@ class DigestRunRow(Base):
     new_jobs: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class JobCheckRow(Base):
+    """Last open/closed check per job (cortex check-open), so a small daily budget rotates through the queue
+    instead of re-checking the same jobs. One row per job, overwritten. New table: no migration."""
+    __tablename__ = "job_checks"
+    __table_args__ = (UniqueConstraint("user_id", "job_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    job_id: Mapped[int] = mapped_column(Integer, index=True)
+    verdict: Mapped[str] = mapped_column(String(16))
+    checked_at: Mapped[date] = mapped_column(Date)
+
+
 def get_session(url: str = "sqlite:///data/cortex.db"):
     engine = create_engine(url)
     Base.metadata.create_all(engine)
