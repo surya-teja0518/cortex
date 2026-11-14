@@ -117,3 +117,17 @@ def test_queue_llm_first_fit_breaks_ties(ses, tmp_path):
     from cortex.eval import llm_score_cached
     llm_score_cached(ses, LLM, b, "u1")                                         # LLM loves the weak-fit one
     assert review_queue(ses, "u1")[0]["id"] == b.id                             # LLM score wins over fit
+
+
+def test_profile_change_rescores_old_generic_scores(ses, tmp_path):
+    j = add(ses, 1, "Python, SQL, PySpark, Snowflake")
+    ok = json.dumps({"score": 60, "reasons": ["fit"], "red_flags": []})
+    generic = LLMScorer(FakeProvider([ok]), NoLimit(), AuditLog(str(tmp_path / "a.log")), BANDS)
+    assert score_new(ses, "u1", generic, limit=10).scored == 1
+    assert score_new(ses, "u1", generic, limit=10).candidates == 0              # same prompt: nothing to pay for
+    fp = FakeProvider([json.dumps({"score": 91, "reasons": ["fit"], "red_flags": []})])
+    profiled = LLMScorer(fp, NoLimit(), AuditLog(str(tmp_path / "a.log")), BANDS, profile="a candidate; skills: X")
+    r = score_new(ses, "u1", profiled, limit=10)
+    assert (r.candidates, r.scored) == (1, 1) and "skills: X" in fp.prompts[0]
+    from cortex.agents.batch_score import latest_llm_scores
+    assert latest_llm_scores(ses, "u1")[j.id].score == 91                       # dashboard shows the new score
