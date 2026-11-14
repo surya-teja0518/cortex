@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from sqlalchemy import select
 
-from cortex.agents.scorer import LLMScorer, ScorerOutcome
+from cortex.agents.scorer import LLMScorer, ScorerOutcome, ScoringInput
 from cortex.db.schema import JobRow, LLMScoreCacheRow, SkillFitRow
 from cortex.eval import llm_score_cached
 
@@ -66,10 +66,28 @@ def fits(session, user_id: str, job_ids: list[int] | None = None) -> dict[int, i
     return dict(session.execute(q).all())
 
 
-def candidates(session, user_id: str, limit: int) -> list[JobRow]:
-    """Not yet LLM-scored, best local skill-fit first (no fit -> after), newest first within equal fit. So the
-    free LLM quota goes to the jobs most likely to suit him."""
-    done = _scored_ids(session, user_id)
+def _scored_now(session, user_id: str, scorer: LLMScorer | None) -> set[int]:
+    """Jobs whose cached score came from THIS scorer: same provider and the same prompt (profile, excluded
+    fields and job text all change the prompt hash). A score from an older prompt doesn't count, so turning the
+    skills profile on re-scores the backlog instead of leaving it on the generic prompt forever."""
+    if scorer is None:
+        return _scored_ids(session, user_id)
+    have = {(r.job_id, r.prompt_sha256) for r in session.scalars(select(LLMScoreCacheRow).where(
+        LLMScoreCacheRow.user_id == user_id, LLMScoreCacheRow.provider == scorer.provider.name))}
+    if not have:
+        return set()
+    out = set()
+    for j in session.scalars(_live(user_id)):
+        sha = hashlib.sha256(scorer.render(ScoringInput.from_row(j))[0].encode()).hexdigest()
+        if (j.id, sha) in have:
+            out.add(j.id)
+    return out
+
+
+def candidates(session, user_id: str, limit: int, scorer: LLMScorer | None = None) -> list[JobRow]:
+    """Not yet scored by this scorer, best local skill-fit first (no fit -> after), newest first within equal fit.
+    So the free LLM quota goes to the jobs most likely to suit him."""
+    done = _scored_now(session, user_id, scorer)
     rows = [r for r in session.scalars(_live(user_id)) if r.id not in done]
     fit = fits(session, user_id, [r.id for r in rows])
     rows.sort(key=lambda r: (fit.get(r.id) is None, -(fit.get(r.id) or 0), -r.id))
@@ -78,7 +96,7 @@ def candidates(session, user_id: str, limit: int) -> list[JobRow]:
 
 def score_new(session, user_id: str, scorer: LLMScorer, limit: int = 100,
               progress: Callable[[int, int], None] | None = None) -> BatchResult:
-    rows = candidates(session, user_id, limit)
+    rows = candidates(session, user_id, limit, scorer)
     res = BatchResult(candidates=len(rows))
     fails = 0
     for i, r in enumerate(rows, 1):
