@@ -42,6 +42,7 @@ pip install -e ".[dev,ui]" && pytest
 cp .env.example .env
 cp contact.example.yaml contact.yaml          # resume PDF header (gitignored)
 cp answers.example.yaml answers.yaml          # your standard form answers (gitignored; edit them!)
+# personal settings: cp config.local.example.yaml config.local.yaml (gitignored; overrides config.yaml)
 # export Google Sheets -> CSV (File > Download > CSV), put files in data/import/ (gitignored)
 cortex import data/import/<master>.csv data/import/<batch>.csv   # master first, then batches oldest -> newest
 cortex fetch --dry-run # public Greenhouse/Lever/Ashby boards from config.yaml (sources.ats.boards); drop --dry-run to save

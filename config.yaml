@@ -87,7 +87,8 @@ tracker:
 freshness:
   max_age_days: 30
 # `cortex check-open`: is a LinkedIn job still open? Reads LinkedIn's PUBLIC no-login job page from your Mac.
-# A deliberate exception to "no LinkedIn scraping" (Surya, 2026-11-13; AGENTS.md). Off by default. Risk: LinkedIn
+# A deliberate exception to "no LinkedIn scraping" (Surya, 2026-11-13; AGENTS.md). Off by default: turn it on in
+# config.local.yaml (gitignored), not here. Risk: LinkedIn
 # may throttle or CAPTCHA your home IP; the run stops at the first push-back. Never part of `cortex daily`.
 linkedin_check:
   enabled: false
