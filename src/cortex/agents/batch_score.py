@@ -5,15 +5,18 @@ scored here is never paid for again in eval and vice versa. jobs.score/band stay
 eval compares the two, so overwriting the rules' score would destroy the baseline.
 
 Which jobs: to_apply, not gated, not a duplicate, not injection-flagged (flagged jobs never reach an LLM),
-and no cached LLM result yet. Newest first, capped per run (Groq's free tier allows ~500 calls/day).
+and no cached LLM result yet. Best local skill-fit first (compute_fits, no LLM), then newest; capped per run
+(Groq's free tier allows ~500 calls/day).
 """
+import hashlib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from sqlalchemy import select
 
 from cortex.agents.scorer import LLMScorer, ScorerOutcome
-from cortex.db.schema import JobRow, LLMScoreCacheRow
+from cortex.db.schema import JobRow, LLMScoreCacheRow, SkillFitRow
 from cortex.eval import llm_score_cached
 
 MAX_CONSECUTIVE_FAILURES = 5
@@ -31,12 +34,46 @@ def _scored_ids(session, user_id: str) -> set[int]:
     return set(session.scalars(select(LLMScoreCacheRow.job_id).where(LLMScoreCacheRow.user_id == user_id)))
 
 
+def _live(user_id: str):
+    return select(JobRow).where(JobRow.user_id == user_id, JobRow.status == "to_apply", JobRow.gate_reason.is_(None),
+                                JobRow.dup_of_id.is_(None), JobRow.sanitizer_flags.is_(None))
+
+
+def compute_fits(session, user_id: str, matcher) -> int:
+    """Local skill-fit for every live job whose text is new or changed. Returns how many were (re)computed."""
+    have = {r.job_id: r for r in session.scalars(select(SkillFitRow).where(SkillFitRow.user_id == user_id))}
+    n = 0
+    for j in session.scalars(_live(user_id)):
+        text = f"{j.title}\n{j.description or ''}"
+        sha = hashlib.sha256(text.encode()).hexdigest()
+        row = have.get(j.id)
+        if row is not None and row.text_sha == sha:
+            continue
+        f = matcher.fit(text)
+        if row is None:
+            row = SkillFitRow(user_id=user_id, job_id=j.id)
+            session.add(row)
+        row.score, row.matched, row.missing, row.text_sha = f.score, json.dumps(f.matched), json.dumps(f.missing), sha
+        n += 1
+    session.commit()
+    return n
+
+
+def fits(session, user_id: str, job_ids: list[int] | None = None) -> dict[int, int | None]:
+    q = select(SkillFitRow.job_id, SkillFitRow.score).where(SkillFitRow.user_id == user_id)
+    if job_ids is not None:
+        q = q.where(SkillFitRow.job_id.in_(job_ids))
+    return dict(session.execute(q).all())
+
+
 def candidates(session, user_id: str, limit: int) -> list[JobRow]:
+    """Not yet LLM-scored, best local skill-fit first (no fit -> after), newest first within equal fit. So the
+    free LLM quota goes to the jobs most likely to suit him."""
     done = _scored_ids(session, user_id)
-    q = (select(JobRow).where(JobRow.user_id == user_id, JobRow.status == "to_apply", JobRow.gate_reason.is_(None),
-                              JobRow.dup_of_id.is_(None), JobRow.sanitizer_flags.is_(None))
-         .order_by(JobRow.id.desc()))
-    return [r for r in session.scalars(q) if r.id not in done][:limit]
+    rows = [r for r in session.scalars(_live(user_id)) if r.id not in done]
+    fit = fits(session, user_id, [r.id for r in rows])
+    rows.sort(key=lambda r: (fit.get(r.id) is None, -(fit.get(r.id) or 0), -r.id))
+    return rows[:limit]
 
 
 def score_new(session, user_id: str, scorer: LLMScorer, limit: int = 100,

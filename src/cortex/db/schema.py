@@ -164,6 +164,21 @@ class JobCheckRow(Base):
     checked_at: Mapped[date] = mapped_column(Date)
 
 
+class SkillFitRow(Base):
+    """Local skill-fit per job (core/skillfit.py): share of the job's tech terms his resume covers. Computed on
+    his Mac, no LLM. score is None when the job text names too few terms (e.g. sheet rows with no description).
+    One row per job, recomputed when the job text changes (text_sha). New table: no migration."""
+    __tablename__ = "skill_fits"
+    __table_args__ = (UniqueConstraint("user_id", "job_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    job_id: Mapped[int] = mapped_column(Integer, index=True)
+    score: Mapped[int | None] = mapped_column(Integer)
+    matched: Mapped[str] = mapped_column(Text, default="[]")   # JSON list of term names
+    missing: Mapped[str] = mapped_column(Text, default="[]")
+    text_sha: Mapped[str] = mapped_column(String(64))
+
+
 def get_session(url: str = "sqlite:///data/cortex.db"):
     engine = create_engine(url)
     Base.metadata.create_all(engine)
