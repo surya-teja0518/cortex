@@ -341,9 +341,10 @@ def packet_builder(master_path: str = "master_resume.yaml", contact_path: str = 
     from cortex.agents.workday import load_answers
     from cortex.core.resume import load_master
     try:
-        odir = originals_dir or load_config().get("tailor", {}).get("originals_dir", "resumes")
-        return PacketBuilder(load_master(master_path), load_contact(contact_path),
-                             answers=load_answers(answers_path), originals_dir=odir), None
+        tcfg = load_config().get("tailor", {})
+        odir = originals_dir or tcfg.get("originals_dir", "resumes")
+        return PacketBuilder(load_master(master_path), load_contact(contact_path), answers=load_answers(answers_path),
+                             originals_dir=odir, originals=tcfg.get("originals") or {}), None
     except (OSError, ValueError, PacketError) as e:
         return None, str(e)
 
@@ -366,7 +367,7 @@ def cmd_workday_fill(a, uid):
     import json
     from pathlib import Path
 
-    from cortex.agents.packet import load_contact
+    from cortex.agents.packet import load_contact, packet_resume
     from cortex.agents.workday import load_answers
     from cortex.agents.workday_browser import open_browser
     from cortex.agents.workday_fill import (
@@ -396,7 +397,7 @@ def cmd_workday_fill(a, uid):
         pk = ses.scalars(select(PacketRow.path).where(PacketRow.user_id == uid, PacketRow.job_id == a.job_id)
                          .order_by(PacketRow.id.desc())).first()
         plan = build_plan(load_master(a.master), TailoredResume.model_validate(json.loads(tr.resume_json)),
-                          load_contact(a.contact), load_answers(), Path(pk) / "resume.pdf" if pk else None)
+                          load_contact(a.contact), load_answers(), packet_resume(pk) if pk else None)
     pw, browser, page = open_browser(start)
     try:
         if a.inspect:

@@ -136,6 +136,7 @@ SHEETS SYNC (branch feat/sheets-sync, 2026-11-14): `sources/sheets_sync.py` + `c
 - Auth: Google service account JSON key (gitignored `google-service-account.json`; `*service-account*.json`), token via google-auth (optional extra `[sheets]`), Authorization header only; spreadsheet id + tab validated; sheet shared with the service account email only. Audit counts only.
 - Config: `sheets.enabled/spreadsheet_id/tab/key_file/write_back` (personal values in config.local.yaml).
 - NOT verified live from the cloud env: first run = `cortex sync --dry-run` on the Mac.
+RESUME FILE NAMES (branch feat/resume-filenames, stacked on feat/sheets-sync, 2026-11-14): config `tailor.originals` (track -> his own file name inside resumes/, set in config.local.yaml; default <track>.pdf). The packet keeps HIS file name (recruiters see the attachment name; "resume.pdf" looked unprofessional); names validated (plain basename ending .pdf, no paths). job.md names the file; `packet_resume(folder)` finds it for workday-fill.
 NOT built yet: nothing outstanding.
 
 ## Build order (each step must be usable on its own)

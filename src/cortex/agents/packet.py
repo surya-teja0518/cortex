@@ -89,8 +89,12 @@ class PacketResult:
 
 class PacketBuilder:
     def __init__(self, master: MasterResume, contact: ContactInfo, root: str | Path = "packets",
-                 answers: StandardAnswers | None = None, originals_dir: str | Path = "resumes"):
+                 answers: StandardAnswers | None = None, originals_dir: str | Path = "resumes",
+                 originals: dict[str, str] | None = None):
+        """originals: track -> his own file name in originals_dir (config tailor.originals); default <track>.pdf.
+        The packet keeps that exact file name: recruiters see the attachment's name."""
         self.originals_dir = Path(originals_dir)
+        self.originals = dict(originals or {})
         self.master = master
         self.contact = contact
         self.answers = answers
@@ -114,6 +118,8 @@ class PacketBuilder:
         folder.mkdir(parents=True, exist_ok=True)
         pdf = folder / "resume.pdf"
         if (resume.based_on or "").startswith("original:"):
+            src = self._original_path(resume.based_on.split(":", 1)[1])
+            pdf = folder / src.name
             self._copy_original(resume.based_on.split(":", 1)[1], pdf)
         else:
             self._render_pdf(resume, pdf, company=company, title=title)
@@ -126,35 +132,42 @@ class PacketBuilder:
         wd = folder / "workday.md"
         wd.write_text(render_sheet(self.master, resume, self.contact, self.answers, company=company, title=title))
         md = folder / "job.md"
-        md.write_text(self._job_md(company, title, location, url, has_cover=bool(resume.cover_note)))
+        md.write_text(self._job_md(company, title, location, url, has_cover=bool(resume.cover_note), resume_name=pdf.name))
         return PacketResult(folder, pdf, md, cover_pdf, cover_txt, wd)
 
-    def _copy_original(self, track: str, dest: Path) -> None:
-        """Surya's own resume file, byte for byte. Track names come from master_resume.yaml, but are still
-        checked so a name can never point outside resumes/."""
+    def _original_path(self, track: str) -> Path:
+        """resumes/<file> for this track. Track and file name are checked so nothing can point outside resumes/."""
         if not re.fullmatch(r"[a-z0-9_]{1,40}", track):
             raise PacketError(f"invalid track name {track!r}")
-        src = self.originals_dir / f"{track}.pdf"
+        name = self.originals.get(track, f"{track}.pdf")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._()-]{0,120}\.pdf", name, re.IGNORECASE):
+            raise PacketError(f"invalid resume file name for {track}: {name!r} (plain file name ending in .pdf)")
+        return self.originals_dir / name
+
+    def _copy_original(self, track: str, dest: Path) -> None:
+        """Surya's own resume file, byte for byte."""
+        src = self._original_path(track)
         if not src.is_file():
-            raise PacketError(f"{src} not found: save your {track.replace('_', ' ')} resume PDF there "
-                              f"(files: {self.originals_dir}/data_engineer.pdf, oracle_dba.pdf, ai_ml.pdf)")
+            raise PacketError(f"{src} not found: put your {track.replace('_', ' ')} resume there, or map the track to "
+                              f"your file name under tailor.originals in config.local.yaml")
         data = src.read_bytes()
         if not data.startswith(b"%PDF"):
             raise PacketError(f"{src} is not a PDF")
         dest.write_bytes(data)
 
     # ---- rendering ----
-    def _job_md(self, company: str, title: str, location: str, url: str | None, has_cover: bool = False) -> str:
+    def _job_md(self, company: str, title: str, location: str, url: str | None, has_cover: bool = False,
+                resume_name: str = "resume.pdf") -> str:
         link = safe_url(url)
         clean = " ".join(f"{company} | {title}".split())
         return (f"# {clean}\n\n"
                 + (f"- Location: {' '.join(location.split())}\n" if location else "")
                 + (f"- Apply: {link}\n" if link else "- Apply: (no valid http(s) link on record; find it manually)\n")
-                + "- Resume: resume.pdf (approved in the CORTEX dashboard)\n"
+                + f"- Resume: {resume_name} (approved in the CORTEX dashboard)\n"
                 + ("- Cover note: cover_note.pdf (cover_note.txt for paste-in forms)\n" if has_cover else "")
                 + "- Workday: workday.md has every field in page order, ready to paste\n"
                 + "\n"
-                  "CORTEX never submits applications. Open the link, attach resume.pdf, and apply yourself.\n")
+                  f"CORTEX never submits applications. Open the link, attach {resume_name}, and apply yourself.\n")
 
     def _render_pdf(self, r: TailoredResume, path: Path, *, company: str, title: str) -> None:
         from reportlab.lib import colors
@@ -248,3 +261,13 @@ class PacketBuilder:
         SimpleDocTemplate(str(path), pagesize=A4, leftMargin=22 * mm, rightMargin=22 * mm, topMargin=18 * mm,
                           bottomMargin=18 * mm, title=f"{c.name} - cover note - {company} {title}"[:120],
                           author=c.name, creator="CORTEX").build(story)
+
+
+def packet_resume(folder: str | Path) -> Path | None:
+    """The resume PDF in a packet folder: resume.pdf (rendered) or his own original (any other PDF that isn't the
+    cover note)."""
+    f = Path(folder)
+    if (f / "resume.pdf").is_file():
+        return f / "resume.pdf"
+    pdfs = sorted(p for p in f.glob("*.pdf") if p.name != "cover_note.pdf")
+    return pdfs[0] if len(pdfs) == 1 else None

@@ -92,3 +92,25 @@ def test_track_name_cannot_escape_resumes_dir(tmp_path):
     b = builder(tmp_path, {})
     with pytest.raises(PacketError, match="invalid track"):
         b._copy_original("../../etc/passwd", tmp_path / "out.pdf")
+
+
+def test_packet_keeps_your_own_file_name(tmp_path):
+    from cortex.agents.packet import packet_resume
+    name = "Surya_teja_vajjhala_OracleDBA_Resume.pdf"
+    d = tmp_path / "resumes"
+    d.mkdir()
+    (d / name).write_bytes(b"%PDF-1.7 mine")
+    b = PacketBuilder(MASTER, CONTACT, root=tmp_path / "packets", originals_dir=d, originals={"oracle_dba": name})
+    r = TrackTailor(MASTER, original=True).build(job("Oracle DBA", "RMAN backups patching"), "database")
+    out = b.build(r, user_id="u1", job_id=3, company="Acme", title="DBA")
+    assert out.resume_pdf.name == name and out.resume_pdf.read_bytes() == b"%PDF-1.7 mine"
+    assert not (out.folder / "resume.pdf").exists()
+    assert name in out.job_md.read_text()
+    assert packet_resume(out.folder) == out.resume_pdf                          # workday-fill attaches this one
+
+
+@pytest.mark.parametrize("bad", ["../x.pdf", "a/b.pdf", "x.exe", "/etc/passwd.pdf", ".hidden.pdf", ""])
+def test_original_file_names_validated(tmp_path, bad):
+    b = PacketBuilder(MASTER, CONTACT, root=tmp_path / "p", originals_dir=tmp_path, originals={"oracle_dba": bad})
+    with pytest.raises(PacketError, match="invalid resume file name"):
+        b._original_path("oracle_dba")
