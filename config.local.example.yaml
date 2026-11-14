@@ -1,0 +1,10 @@
+# Copy to config.local.yaml (gitignored) and keep only what you change. Merged on top of config.yaml.
+linkedin_check:
+  enabled: true
+# sources:
+#   ats:
+#     boards:
+#       - {ats: greenhouse, board: <slug>, company: <Name>}
+# daily:
+#   hour: 9
+#   minute: 7

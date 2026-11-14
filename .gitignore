@@ -13,3 +13,4 @@ packets/
 master_resume.yaml
 contact.yaml
 answers.yaml
+config.local.yaml
