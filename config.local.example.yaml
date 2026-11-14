@@ -8,3 +8,6 @@ linkedin_check:
 # daily:
 #   hour: 9
 #   minute: 7
+# sheets:
+#   enabled: true
+#   spreadsheet_id: <id from your sheet URL /d/<id>/edit>

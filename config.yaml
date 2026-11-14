@@ -97,6 +97,16 @@ linkedin_check:
   recheck_days: 3        # a job checked open isn't re-checked for this long, so runs rotate through the queue
   max_age_days: 30       # only check postings newer than this; older ones are hidden in the queue anyway
 
+# Two-way Google Sheet sync (`cortex sync`; first step of `cortex daily` when enabled). Set enabled +
+# spreadsheet_id (from the sheet URL /d/<id>/edit) in config.local.yaml. key_file = the service account's JSON
+# key (a secret: gitignored). Writes ONLY the Status column, only when CORTEX knows a later status.
+sheets:
+  enabled: false
+  spreadsheet_id: ""
+  tab: Untitled
+  key_file: google-service-account.json
+  write_back: true
+
 # `cortex daily` (pull -> fetch -> score -> digest), run by launchd: `cortex schedule --install`.
 daily:
   hour: 9            # local time on the Mac; launchd runs a missed time when the Mac wakes

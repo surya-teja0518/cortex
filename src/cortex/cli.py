@@ -81,6 +81,23 @@ def cmd_check_open(a, uid):
     print("dry run: nothing changed" if a.dry_run else f"{r.closed} marked not_accepting")
 
 
+def cmd_sync(a, uid):
+    """Two-way sync with the Google Sheet tracker: read every row, write back ONLY Status cells CORTEX knows better."""
+    from cortex.sources.sheets_sync import SheetsError, client_from_config, sync
+    cfg = load_config(a.config)
+    try:
+        r = sync(_session(), cfg, uid, client_from_config(cfg), dry_run=a.dry_run, audit=AuditLog())
+    except SheetsError as e:
+        raise SystemExit(f"sync failed: {e}") from None
+    s = r.read
+    print(f"sheet -> CORTEX: rows={s.rows_read} new={s.inserted} updated={s.updated} gated={s.gated} "
+          f"flagged={s.flagged} possible_dups={s.duplicates}")
+    print(f"CORTEX -> sheet: {len(r.to_write)} Status cells to update")
+    for cell, company, title, label in r.to_write[:25]:
+        print(f"    {cell:<6} {company} | {title}  ->  {label}")
+    print("dry run: nothing written to the sheet or the database" if a.dry_run else f"{r.written} cells written")
+
+
 def cmd_stats(a, uid):
     ses = _session()
     for label, col in (("status", JobRow.status), ("track", JobRow.track), ("cortex band", JobRow.band)):
@@ -231,6 +248,10 @@ def cmd_daily(a, uid):
     dcfg = cfg.get("daily", {})
     has_boards = bool((cfg.get("sources") or {}).get("ats", {}).get("boards"))
     fetch = (lambda s: fetch_all(s, cfg, uid, audit=audit)) if has_boards and not a.no_fetch else None
+    sync_step = None
+    if (cfg.get("sheets") or {}).get("enabled") and not a.no_sync:
+        from cortex.sources.sheets_sync import client_from_config, sync
+        sync_step = lambda s: sync(s, cfg, uid, client_from_config(cfg), audit=audit)
     has_actors = bool((cfg.get("sources") or {}).get("apify", {}).get("actors"))
     pull = None
     if has_actors and not a.no_pull:
@@ -242,7 +263,7 @@ def cmd_daily(a, uid):
             _compute_fits(s, uid)
             return score_new(s, uid, _build_scorer(cfg, audit, profile=_profile(cfg)), limit=dcfg.get("score_limit", 100))
     print(f"[{datetime.now():%Y-%m-%d %H:%M}] cortex daily")  # noqa: DTZ005 (local time for the log)
-    res = run_daily(ses, cfg, uid, datetime.now().date(), fetch=fetch, score=score, pull=pull,  # noqa: DTZ005
+    res = run_daily(ses, cfg, uid, datetime.now().date(), fetch=fetch, score=score, pull=pull, sync=sync_step,  # noqa: DTZ005
                     digest=_digest_fn(cfg, uid, audit, a.dry_run), audit=audit)
     for n in res.notes:
         print(f"  {n}")
@@ -505,6 +526,9 @@ def main(argv=None):
     wf.add_argument("--master", default="master_resume.yaml")
     wf.add_argument("--contact", default="contact.yaml")
     wf.set_defaults(fn=cmd_workday_fill)
+    sy = sub.add_parser("sync", help="two-way sync with your Google Sheet tracker (Status column only)")
+    sy.add_argument("--dry-run", action="store_true", help="show what would change; write nothing anywhere")
+    sy.set_defaults(fn=cmd_sync)
     pl = sub.add_parser("pull", help="read SYNAPSE's recent Apify datasets (APIFY_TOKEN in .env); never starts runs")
     pl.add_argument("--dry-run", action="store_true", help="show what would be added; save nothing")
     pl.set_defaults(fn=cmd_pull)
@@ -523,6 +547,7 @@ def main(argv=None):
     dl.add_argument("--dry-run", action="store_true", help="print the digest instead of sending it")
     dl.add_argument("--no-fetch", action="store_true")
     dl.add_argument("--no-pull", action="store_true")
+    dl.add_argument("--no-sync", action="store_true")
     dl.add_argument("--no-score", action="store_true")
     dl.set_defaults(fn=cmd_daily)
     sh = sub.add_parser("schedule", help="show / install the macOS launchd job for `cortex daily`")
