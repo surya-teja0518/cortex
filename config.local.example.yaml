@@ -11,3 +11,8 @@ linkedin_check:
 # sheets:
 #   enabled: true
 #   spreadsheet_id: <id from your sheet URL /d/<id>/edit>
+# tailor:
+#   originals:                 # your own file names inside resumes/ (recruiters see them; keep them professional)
+#     data_engineer: Firstname_Lastname_DataEngineer_Resume.pdf
+#     oracle_dba: Firstname_Lastname_OracleDBA_Resume.pdf
+#     ai_ml: Firstname_Lastname_ML_Resume.pdf

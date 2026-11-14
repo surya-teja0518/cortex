@@ -72,7 +72,8 @@ llm:
 # track: render the curated track from master_resume.yaml with relevant bullets first. llm: the Ollama rewrite tailor.
 tailor:
   mode: original             # original: your own PDF from originals_dir, picked by classifying the job (DBA/DE/AI)
-  originals_dir: resumes     # resumes/data_engineer.pdf, oracle_dba.pdf, ai_ml.pdf (gitignored)
+  originals_dir: resumes     # gitignored folder with your 3 resume PDFs
+  originals: {}              # track -> your file name; default <track>.pdf. Set yours in config.local.yaml
   track_map: {data: data_engineer, database: oracle_dba, ai: ai_ml}
   default_track: data_engineer
   cover_note: false          # llm mode only; Surya doesn't send cover letters
