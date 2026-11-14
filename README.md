@@ -48,6 +48,7 @@ cortex import data/import/<master>.csv data/import/<batch>.csv   # master first,
 cortex fetch --dry-run # public Greenhouse/Lever/Ashby boards from config.yaml (sources.ats.boards); drop --dry-run to save
 cortex workday-fill <job_id> --url <workday link> # types your details into an open Workday form; never clicks or submits
 cortex check-open --dry-run # opt-in: are recent LinkedIn jobs still open? public no-login page, slow, stops if throttled
+cortex sync --dry-run # two-way Google Sheet sync: read all rows; write back ONLY Status cells CORTEX knows better
 cortex pull --dry-run # read SYNAPSE's recent Apify datasets (LinkedIn/Naukri; APIFY_TOKEN); never starts a run
 cortex score          # LLM-score new jobs (cached; dashboard + digest rank by it; rule score kept for eval)
 cortex digest --dry-run # today's email digest (GMAIL_ADDRESS + GMAIL_APP_PASSWORD in .env); drop --dry-run to send

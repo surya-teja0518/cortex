@@ -130,8 +130,13 @@ SKILL-FIT SCORING (branch feat/skill-fit-scoring, stacked on feat/check-on-tailo
 - Queue ranking (Surya's choice): LLM score first; skill-fit (new `fit` column) breaks ties and orders the not-yet-LLM-scored rest.
 - Reality (2026-11-13, consolidated sheet): only 11 of 933 live jobs have a fit: sheet rows have no job description. Fits grow as `pull`/`fetch` bring descriptions (pull also back-fills sheet rows still in recent SYNAPSE runs).
 CONFIG LOCAL (branch feat/config-local, 2026-11-14): `config.local.yaml` (gitignored; template config.local.example.yaml) is deep-merged over config.yaml by `load_config` (dicts merge, lists replace). Personal settings (linkedin_check.enabled, ATS boards, schedule) go there so `git pull` never conflicts. tests/conftest.py sets CORTEX_NO_LOCAL_CONFIG=1 so his local file never changes test results.
-PLANNED (Surya approved 2026-11-13): #1 two-way Google Sheet sync, Status column only, via a Google service account.
-NOT built yet: the PLANNED items above.
+SHEETS SYNC (branch feat/sheets-sync, 2026-11-14): `sources/sheets_sync.py` + `cortex sync [--dry-run]`; first step of `cortex daily` when `sheets.enabled` (`--no-sync`).
+- READ: all rows of the tab via the Sheets API -> `parse_rows` + `import_rows` (same path as CSV import: status mapping, OA hint, never-downgrade).
+- WRITE: ONLY Status cells (column found by header), ONLY when CORTEX's status ranks above the sheet's and is in SHEET_LABEL (applied/interview/offer/rejected/no_response/not_accepting/closed); labels round-trip through the importer (tested). Never internal states, never other columns, valueInputOption RAW (no formulas).
+- Auth: Google service account JSON key (gitignored `google-service-account.json`; `*service-account*.json`), token via google-auth (optional extra `[sheets]`), Authorization header only; spreadsheet id + tab validated; sheet shared with the service account email only. Audit counts only.
+- Config: `sheets.enabled/spreadsheet_id/tab/key_file/write_back` (personal values in config.local.yaml).
+- NOT verified live from the cloud env: first run = `cortex sync --dry-run` on the Mac.
+NOT built yet: nothing outstanding.
 
 ## Build order (each step must be usable on its own)
 1. **MVP (DONE, v0.2):** SYNAPSE import → dedupe → gates → deterministic score → Streamlit review list. Next for this step: import real Batch016 export, then the older batches (master first).

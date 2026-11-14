@@ -11,6 +11,7 @@ dependencies = ["pydantic>=2.7", "sqlalchemy>=2.0", "python-dotenv>=1.0", "pyyam
 dev = ["pytest>=8.0", "ruff>=0.6", "pypdf>=4.0"]
 ui = ["streamlit>=1.40"]
 workday = ["playwright>=1.48"]
+sheets = ["google-auth>=2.30", "requests>=2.32"]
 
 [project.scripts]
 cortex = "cortex.cli:main"

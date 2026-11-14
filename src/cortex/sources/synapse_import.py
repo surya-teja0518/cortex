@@ -49,19 +49,21 @@ def _canon_header(h: str) -> str | None:
     return _ALIASES.get(k)
 
 
-def read_tracker_csv(path: str | Path) -> list[dict]:
-    """Read a Google-Sheets CSV export. Header row is located by content, not position."""
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        rows = list(csv.reader(f))
+def parse_rows(rows: list[list[str]], where: str = "sheet") -> tuple[int, list[str | None], list[dict]]:
+    """Rows from a CSV export or the Sheets API -> (header row index, canonical header, row dicts).
+    The header row is located by content, not position."""
     for i, r in enumerate(rows[:6]):
         mapped = [_canon_header(c) for c in r]
         if all(req in mapped for req in REQUIRED):
-            header = mapped
             body = rows[i + 1:]
-            break
-    else:
-        raise ValueError(f"{path}: no header row with Company/Role found in first 6 rows")
-    return [{h: (c if h else None) for h, c in zip(header, r) if h} for r in body]
+            return i, mapped, [{h: (c if h else None) for h, c in zip(mapped, r) if h} for r in body]
+    raise ValueError(f"{where}: no header row with Company/Role found in first 6 rows")
+
+
+def read_tracker_csv(path: str | Path) -> list[dict]:
+    """Read a Google-Sheets CSV export."""
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        return parse_rows(list(csv.reader(f)), str(path))[2]
 
 
 def _txt(v, cap: int = 256) -> str:
@@ -126,34 +128,38 @@ def row_to_values(raw: dict, user_id: str, batch: str, cfg: dict) -> tuple[dict,
     return vals, {"gated": gate is not None, "flagged": bool(flags)}
 
 
+def import_rows(raws: list[dict], batch: str, session, cfg: dict, user_id: str, sm: ImportSummary) -> None:
+    """Upsert tracker rows (from a CSV file or the live sheet). Never downgrades a more advanced status."""
+    for raw in raws:
+        sm.rows_read += 1
+        out = row_to_values(raw, user_id, batch, cfg)
+        if out is None:
+            sm.skipped_blank += 1
+            continue
+        vals, info = out
+        sm.gated += info["gated"]
+        sm.flagged += info["flagged"]
+        existing = session.scalar(select(JobRow).where(
+            JobRow.user_id == user_id, JobRow.source == vals["source"],
+            JobRow.external_id == vals["external_id"]))
+        if existing is None:
+            session.add(JobRow(**vals))
+            sm.inserted += 1
+        else:
+            if P.STATUS_RANK.get(vals["status"], 0) < P.STATUS_RANK.get(existing.status, 0):
+                for k in ("status", "status_raw", "applied_date"):
+                    vals.pop(k)          # never downgrade a more advanced status
+            for k, v in vals.items():
+                setattr(existing, k, v)
+            sm.updated += 1
+
+
 def import_files(paths: list[str | Path], session, cfg: dict, user_id: str,
                  audit: AuditLog | None = None) -> ImportSummary:
     """Import in the order given (pass the master first, then batches oldest -> newest)."""
     sm = ImportSummary()
     for path in paths:
-        batch = Path(path).stem
-        for raw in read_tracker_csv(path):
-            sm.rows_read += 1
-            out = row_to_values(raw, user_id, batch, cfg)
-            if out is None:
-                sm.skipped_blank += 1
-                continue
-            vals, info = out
-            sm.gated += info["gated"]
-            sm.flagged += info["flagged"]
-            existing = session.scalar(select(JobRow).where(
-                JobRow.user_id == user_id, JobRow.source == vals["source"],
-                JobRow.external_id == vals["external_id"]))
-            if existing is None:
-                session.add(JobRow(**vals))
-                sm.inserted += 1
-            else:
-                if P.STATUS_RANK.get(vals["status"], 0) < P.STATUS_RANK.get(existing.status, 0):
-                    for k in ("status", "status_raw", "applied_date"):
-                        vals.pop(k)          # never downgrade a more advanced status
-                for k, v in vals.items():
-                    setattr(existing, k, v)
-                sm.updated += 1
+        import_rows(read_tracker_csv(path), Path(path).stem, session, cfg, user_id, sm)
     session.flush()
     sm.duplicates = refresh_dups(session, user_id)
     session.commit()
