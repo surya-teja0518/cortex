@@ -28,6 +28,7 @@ class BatchResult:
     scored: int = 0          # new LLM scores
     unscored: int = 0        # fell back to the deterministic score (provider down, bad output)
     stopped_early: str | None = None
+    dry_run: bool = False    # counted only: no LLM calls made
 
 
 def _scored_ids(session, user_id: str) -> set[int]:

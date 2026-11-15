@@ -247,21 +247,27 @@ def cmd_daily(a, uid):
     cfg, audit, ses = load_config(a.config), AuditLog(), _session()
     dcfg = cfg.get("daily", {})
     has_boards = bool((cfg.get("sources") or {}).get("ats", {}).get("boards"))
-    fetch = (lambda s: fetch_all(s, cfg, uid, audit=audit)) if has_boards and not a.no_fetch else None
+    dry = a.dry_run   # dry run = read and report only: no writes anywhere, no LLM calls, no email
+    fetch = (lambda s: fetch_all(s, cfg, uid, audit=audit, dry_run=dry)) if has_boards and not a.no_fetch else None
     sync_step = None
     if (cfg.get("sheets") or {}).get("enabled") and not a.no_sync:
         from cortex.sources.sheets_sync import client_from_config, sync
-        sync_step = lambda s: sync(s, cfg, uid, client_from_config(cfg), audit=audit)
+        sync_step = lambda s: sync(s, cfg, uid, client_from_config(cfg), audit=audit, dry_run=dry)
     has_actors = bool((cfg.get("sources") or {}).get("apify", {}).get("actors"))
     pull = None
     if has_actors and not a.no_pull:
         from cortex.sources.apify import pull_all
-        pull = lambda s: pull_all(s, cfg, uid, audit=audit)
+        pull = lambda s: pull_all(s, cfg, uid, audit=audit, dry_run=dry)
     score = None
     if not a.no_score:
         def score(s):
+            from cortex.agents.batch_score import BatchResult, candidates
+            scorer = _build_scorer(cfg, audit, profile=_profile(cfg))
+            limit = dcfg.get("score_limit", 100)
+            if dry:
+                return BatchResult(candidates=len(candidates(s, uid, limit, scorer)), dry_run=True)
             _compute_fits(s, uid)
-            return score_new(s, uid, _build_scorer(cfg, audit, profile=_profile(cfg)), limit=dcfg.get("score_limit", 100))
+            return score_new(s, uid, scorer, limit=limit)
     print(f"[{datetime.now():%Y-%m-%d %H:%M}] cortex daily")  # noqa: DTZ005 (local time for the log)
     res = run_daily(ses, cfg, uid, datetime.now().date(), fetch=fetch, score=score, pull=pull, sync=sync_step,  # noqa: DTZ005
                     digest=_digest_fn(cfg, uid, audit, a.dry_run), audit=audit)
@@ -545,7 +551,8 @@ def main(argv=None):
     dg.add_argument("--dry-run", action="store_true", help="print it instead of sending")
     dg.set_defaults(fn=cmd_digest)
     dl = sub.add_parser("daily", help="pull -> fetch -> score -> digest (what the schedule runs)")
-    dl.add_argument("--dry-run", action="store_true", help="print the digest instead of sending it")
+    dl.add_argument("--dry-run", action="store_true",
+                    help="read and report only: nothing written (sheet, database), no LLM calls, digest printed not sent")
     dl.add_argument("--no-fetch", action="store_true")
     dl.add_argument("--no-pull", action="store_true")
     dl.add_argument("--no-sync", action="store_true")

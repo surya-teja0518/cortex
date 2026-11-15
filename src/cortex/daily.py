@@ -27,7 +27,8 @@ def run_daily(session, cfg: dict, user_id: str, today: date, *, fetch: Callable 
     if sync is not None:   # first: bring in what SYNAPSE / Surya put in the sheet, write back known statuses
         try:
             r = sync(session)
-            res.notes.append(f"sheet sync: {r.read.inserted} new rows, {r.written} status cells written back")
+            res.notes.append(f"sheet sync: {r.read.inserted} new rows, {r.written} status cells written back"
+                             + (f" ({len(r.to_write)} would be written; dry run)" if r.to_write and not r.written else ""))
         except Exception as e:  # noqa: BLE001 — one step failing must not cost the digest
             session.rollback()
             res.failed_steps.append("sync")
@@ -57,8 +58,11 @@ def run_daily(session, cfg: dict, user_id: str, today: date, *, fetch: Callable 
     if score is not None:
         try:
             b = score(session)
-            res.notes.append(f"LLM scoring: {b.scored} scored, {b.unscored} kept rule scores"
-                             + (f" ({b.stopped_early})" if b.stopped_early else ""))
+            if getattr(b, "dry_run", False):
+                res.notes.append(f"LLM scoring: dry run, would score {b.candidates} jobs (no calls made)")
+            else:
+                res.notes.append(f"LLM scoring: {b.scored} scored, {b.unscored} kept rule scores"
+                                 + (f" ({b.stopped_early})" if b.stopped_early else ""))
         except Exception as e:  # noqa: BLE001
             session.rollback()
             res.failed_steps.append("score")
