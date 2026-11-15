@@ -117,7 +117,7 @@ def cmd_inbox(a, uid):
         r = scan(_session(), cfg, uid, client_from_config(cfg), dry_run=a.dry_run, audit=AuditLog())
     except GmailError as e:
         raise SystemExit(f"inbox check failed: {e}") from None
-    print(f"emails checked: {r.scanned}")
+    print(f"emails checked: {r.scanned}" + (f" ({r.skipped} slow to download: retried next run)" if r.skipped else ""))
     for jid, verdict, company, title in r.applied:
         print(f"  {'would mark' if a.dry_run else 'marked'} {verdict}: [{jid}] {company} | {title}"
               + ("" if a.dry_run else f"   (undo: cortex undo {jid})"))
