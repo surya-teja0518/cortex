@@ -221,3 +221,16 @@ def test_auth_failure_still_stops_the_run(ses):
     c = GmailClient(TOKEN, client=httpx.Client(transport=httpx.MockTransport(handler)), sleep=lambda s: None)
     with pytest.raises(GmailError, match="401"):
         scan(ses, CFG, "u1", c)
+
+
+def test_tech_word_company_only_matches_by_sender(ses):
+    oracle = job(ses, 1, "Oracle", title="Database Engineer")
+    zensar = job(ses, 2, "Zensar Technologies", title="Oracle DBA")
+    m = mail("Your application for Oracle DBA", "we will not be moving forward", sender="Zensar Careers <hr@zensar.com>")
+    f = decide(m, [oracle, zensar])
+    assert f.auto and f.job_ids == [zensar.id]                                   # not Oracle
+    only_oracle = decide(m, [oracle])
+    assert only_oracle is None                                                  # Zensar email can't touch Oracle
+    real = decide(mail("Your Oracle application", "regret to inform you", sender="Oracle Talent <talent@oracle.com>"),
+                  [oracle, zensar])
+    assert real.auto and real.job_ids == [oracle.id]

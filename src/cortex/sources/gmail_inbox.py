@@ -116,13 +116,26 @@ def _named(key: str, raw_company: str, text: str) -> bool:
     return any(len(c) >= 5 and c in toks for c in compact)
 
 
+def _tech_words() -> set[str]:
+    from cortex.agents.truth_guard import TECH_TERMS
+    return {" ".join(_tokens(t)) for t in TECH_TERMS} | {"oracle", "microsoft", "google", "amazon", "ibm", "sap"}
+
+
+TECH_NAMED = _tech_words()   # companies whose name is also a technology / everyday tech word
+
+
 def matching_jobs(mail: Mail, active: list[JobRow]) -> dict[str, list[JobRow]]:
-    """{company key: active jobs at that company} for every company the email names (subject, sender, body)."""
+    """{company key: active jobs at that company} for every company the email names (subject, sender, body).
+    A company whose name is also a technology (Oracle, Snowflake, Databricks...) only counts when it is the
+    SENDER: "your Oracle DBA application at Zensar" must not reject his Oracle application (seen 2026-11-15)."""
     hay = f"{mail.subject} {mail.sender} {mail.text}"
     out: dict[str, list[JobRow]] = {}
     for j in active:
         key = _company_key(j.company)
-        if key and _named(key, j.company, hay):
+        if not key:
+            continue
+        where = mail.sender if key in TECH_NAMED else hay
+        if _named(key, j.company, where):
             out.setdefault(key, []).append(j)
     return out
 
