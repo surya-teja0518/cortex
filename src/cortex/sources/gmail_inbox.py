@@ -226,6 +226,29 @@ def _body_text(part: dict) -> str:
     return sanitize_jd(text[:MAX_TEXT])[0]
 
 
+RATE_LIMIT_REASONS = {"rateLimitExceeded", "userRateLimitExceeded", "concurrentLimitExceeded"}
+_REASON = re.compile(r"^[A-Za-z]{3,40}$")
+
+
+def _reason(r: httpx.Response) -> str:
+    """Google's machine reason ('userRateLimitExceeded', 'insufficientPermissions'...). Only that one word
+    is ever shown: the rest of the error body is not echoed."""
+    try:
+        err = r.json().get("error") or {}
+        reason = ((err.get("errors") or [{}])[0].get("reason")
+                  or next((d.get("reason") for d in err.get("details") or [] if d.get("reason")), ""))
+    except Exception:  # noqa: BLE001 — not JSON: no reason
+        return ""
+    return reason if isinstance(reason, str) and _REASON.match(reason) else ""
+
+
+def _retry_after(r: httpx.Response, default: float) -> float:
+    try:
+        return min(max(float(r.headers.get("retry-after", default)), 1.0), 60.0)
+    except ValueError:
+        return default
+
+
 class GmailClient:
     def __init__(self, token: str, client: httpx.Client | None = None, sleep=None):
         import time
@@ -237,24 +260,36 @@ class GmailClient:
         return "GmailClient(token=***)"
 
     def _get(self, url: str, **params):
-        r = None
+        for rl_try in range(4):           # Gmail rate limits come back as 403/429 with a reason: wait, retry
+            r = self._send(url, params)
+            reason = _reason(r) if r.status_code in (403, 429) else ""
+            if r.status_code == 429 or reason in RATE_LIMIT_REASONS:
+                if rl_try == 3:
+                    raise GmailError(f"HTTP {r.status_code}: Gmail rate limit ({reason or 'too many requests'}); "
+                                     "try again in a few minutes")
+                self._sleep(_retry_after(r, default=5 * 2 ** rl_try))
+                continue
+            break
+        if r.status_code in (401, 403):
+            raise GmailError(f"HTTP {r.status_code}: Gmail access denied"
+                             + (f" ({reason})" if reason else "")
+                             + " (re-run `cortex gmail-auth`; is the Gmail API enabled in your Cortex Cloud project?)")
+        if r.status_code != 200:
+            raise GmailError(f"HTTP {r.status_code}")
+        return r.json()
+
+    def _send(self, url: str, params: dict) -> httpx.Response:
         for attempt in range(3):          # Gmail is occasionally slow on one message: retry, don't give up
             try:
-                r = self._c.get(url, params=params, headers={"Authorization": f"Bearer {self._token}"},
-                                follow_redirects=False)
-                break
+                return self._c.get(url, params=params, headers={"Authorization": f"Bearer {self._token}"},
+                                   follow_redirects=False)
             except (httpx.TimeoutException, httpx.TransportError) as e:
                 if attempt == 2:
                     raise GmailError(type(e).__name__) from None
                 self._sleep(2 * (attempt + 1))
             except httpx.HTTPError as e:
                 raise GmailError(type(e).__name__) from None
-        if r.status_code in (401, 403):
-            raise GmailError(f"HTTP {r.status_code}: Gmail access denied (re-run `cortex gmail-auth`; is the Gmail "
-                             "API enabled in your Cortex Cloud project?)")
-        if r.status_code != 200:
-            raise GmailError(f"HTTP {r.status_code}")
-        return r.json()
+        raise AssertionError("unreachable")
 
     def recent_ids(self, days: int, limit: int = 200) -> list[str]:
         q = f"newer_than:{int(days)}d -category:promotions -category:social -category:forums"
@@ -285,14 +320,16 @@ def scan(session, cfg: dict, user_id: str, client: GmailClient, *, dry_run: bool
     active = list(session.scalars(select(JobRow).where(JobRow.user_id == user_id, JobRow.status.in_(ACTIVE),
                                                        JobRow.dup_of_id.is_(None))))
     res = InboxResult()
+    stop: GmailError | None = None
     for mid in client.recent_ids(int(gc.get("lookback_days", 3))):
         if mid in seen:
             continue
         try:
             mail = client.message(mid)
         except GmailError as e:
-            if str(e).startswith("HTTP 4") and ("401" in str(e) or "403" in str(e)):
-                raise                          # auth problems stop the run (every message would fail)
+            if "access denied" in str(e) or "rate limit" in str(e):
+                stop = e                       # auth / quota problems stop the run (every message would fail);
+                break                          # what was read so far is kept, the rest is read next run
             res.skipped += 1
             continue
         res.scanned += 1
@@ -324,7 +361,9 @@ def scan(session, cfg: dict, user_id: str, client: GmailClient, *, dry_run: bool
     if audit:
         audit.log("gmail_inbox", "scan", user_id=user_id, scanned=res.scanned, skipped=res.skipped,
                   applied=len(res.applied),
-                  to_check=len(res.to_check), dry_run=dry_run)
+                  to_check=len(res.to_check), dry_run=dry_run, stopped=bool(stop))
+    if stop is not None:
+        raise stop
     return res
 
 
