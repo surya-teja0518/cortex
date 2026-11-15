@@ -20,11 +20,25 @@ class DailyResult:
 
 def run_daily(session, cfg: dict, user_id: str, today: date, *, fetch: Callable | None, score: Callable | None,
               digest: Callable, audit: AuditLog | None = None, pull: Callable | None = None,
-              sync: Callable | None = None) -> DailyResult:
+              sync: Callable | None = None, inbox: Callable | None = None) -> DailyResult:
     """pull(session) -> list[ActorResult]; fetch(session) -> list[BoardResult]; score(session) -> BatchResult;
     digest(session, notes) -> status. Pass None to skip a step."""
     res = DailyResult()
-    if sync is not None:   # first: bring in what SYNAPSE / Surya put in the sheet, write back known statuses
+    if inbox is not None:   # rejection / interview emails -> tracker (unambiguous ones only)
+        try:
+            r = inbox(session)
+            for jid, verdict, company, title in r.applied:
+                res.notes.append(f"gmail: marked {verdict}: {company} | {title} (undo: cortex undo {jid})")
+            for verdict, companies, why in r.to_check:
+                res.notes.append(f"gmail: check yourself: possible {verdict} from {companies} ({why})")
+            if not r.applied and not r.to_check:
+                res.notes.append(f"gmail: {r.scanned} new emails, nothing about your applications")
+        except Exception as e:  # noqa: BLE001 — one step failing must not cost the digest
+            session.rollback()
+            res.failed_steps.append("inbox")
+            res.notes.append(f"gmail FAILED: {type(e).__name__}"
+                             + (f" ({e})" if type(e).__name__ == "GmailError" else ""))
+    if sync is not None:   # after inbox, so today's email updates reach the sheet today; then bring in what SYNAPSE / Surya put in the sheet, write back known statuses
         try:
             r = sync(session)
             res.notes.append(f"sheet sync: {r.read.inserted} new rows, {r.written} status cells written back"

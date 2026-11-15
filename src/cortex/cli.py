@@ -98,6 +98,35 @@ def cmd_sync(a, uid):
     print("dry run: nothing written to the sheet or the database" if a.dry_run else f"{r.written} cells written")
 
 
+def cmd_gmail_auth(a, uid):
+    """One-time browser sign-in so CORTEX can READ (only) your Gmail."""
+    from cortex.sources.gmail_inbox import GmailError, authorize
+    gc = load_config(a.config).get("gmail") or {}
+    try:
+        authorize(gc.get("client_file", "gmail-oauth-client.json"), gc.get("token_file", "gmail-token.json"))
+    except GmailError as e:
+        raise SystemExit(f"not authorized: {e}") from None
+    print("Gmail read-only access saved. Test it: cortex inbox --dry-run")
+
+
+def cmd_inbox(a, uid):
+    """Look for rejection / interview emails for your applications; record the unambiguous ones."""
+    from cortex.sources.gmail_inbox import GmailError, client_from_config, scan
+    cfg = load_config(a.config)
+    try:
+        r = scan(_session(), cfg, uid, client_from_config(cfg), dry_run=a.dry_run, audit=AuditLog())
+    except GmailError as e:
+        raise SystemExit(f"inbox check failed: {e}") from None
+    print(f"emails checked: {r.scanned}")
+    for jid, verdict, company, title in r.applied:
+        print(f"  {'would mark' if a.dry_run else 'marked'} {verdict}: [{jid}] {company} | {title}"
+              + ("" if a.dry_run else f"   (undo: cortex undo {jid})"))
+    for verdict, companies, why in r.to_check:
+        print(f"  check yourself: possible {verdict} from {companies} ({why})")
+    if a.dry_run:
+        print("dry run: nothing recorded")
+
+
 def cmd_stats(a, uid):
     ses = _session()
     for label, col in (("status", JobRow.status), ("track", JobRow.track), ("cortex band", JobRow.band)):
@@ -253,6 +282,11 @@ def cmd_daily(a, uid):
     if (cfg.get("sheets") or {}).get("enabled") and not a.no_sync:
         from cortex.sources.sheets_sync import client_from_config, sync
         sync_step = lambda s: sync(s, cfg, uid, client_from_config(cfg), audit=audit, dry_run=dry)
+    inbox_step = None
+    if (cfg.get("gmail") or {}).get("enabled") and not a.no_inbox:
+        from cortex.sources.gmail_inbox import client_from_config as gmail_client
+        from cortex.sources.gmail_inbox import scan
+        inbox_step = lambda s: scan(s, cfg, uid, gmail_client(cfg), audit=audit, dry_run=dry)
     has_actors = bool((cfg.get("sources") or {}).get("apify", {}).get("actors"))
     pull = None
     if has_actors and not a.no_pull:
@@ -270,6 +304,7 @@ def cmd_daily(a, uid):
             return score_new(s, uid, scorer, limit=limit)
     print(f"[{datetime.now():%Y-%m-%d %H:%M}] cortex daily")  # noqa: DTZ005 (local time for the log)
     res = run_daily(ses, cfg, uid, datetime.now().date(), fetch=fetch, score=score, pull=pull, sync=sync_step,  # noqa: DTZ005
+                    inbox=inbox_step,
                     digest=_digest_fn(cfg, uid, audit, a.dry_run), audit=audit)
     for n in res.notes:
         print(f"  {n}")
@@ -536,6 +571,11 @@ def main(argv=None):
     sy = sub.add_parser("sync", help="two-way sync with your Google Sheet tracker (Status column only)")
     sy.add_argument("--dry-run", action="store_true", help="show what would change; write nothing anywhere")
     sy.set_defaults(fn=cmd_sync)
+    ga = sub.add_parser("gmail-auth", help="one-time sign-in: let CORTEX read (only) your Gmail")
+    ga.set_defaults(fn=cmd_gmail_auth)
+    ib = sub.add_parser("inbox", help="find rejection / interview emails for your applications and record them")
+    ib.add_argument("--dry-run", action="store_true", help="show what it would record; record nothing")
+    ib.set_defaults(fn=cmd_inbox)
     pl = sub.add_parser("pull", help="read SYNAPSE's recent Apify datasets (APIFY_TOKEN in .env); never starts runs")
     pl.add_argument("--dry-run", action="store_true", help="show what would be added; save nothing")
     pl.set_defaults(fn=cmd_pull)
@@ -556,6 +596,7 @@ def main(argv=None):
     dl.add_argument("--no-fetch", action="store_true")
     dl.add_argument("--no-pull", action="store_true")
     dl.add_argument("--no-sync", action="store_true")
+    dl.add_argument("--no-inbox", action="store_true")
     dl.add_argument("--no-score", action="store_true")
     dl.set_defaults(fn=cmd_daily)
     sh = sub.add_parser("schedule", help="show / install the macOS launchd job for `cortex daily`")
