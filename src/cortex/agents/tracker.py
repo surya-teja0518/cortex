@@ -1,7 +1,8 @@
 """Tracker agent: the last pipeline step. Records what Surya did with each job and what happened next.
 
-It only records decisions he reports (applied / interview / offer / rejected); it never infers a status,
-never contacts anyone, never submits anything.
+It records decisions he reports (applied / interview / offer / rejected), plus, since 2026-11-15 and by his
+decision, unambiguous rejection/interview emails found by the read-only Gmail watcher (sources/gmail_inbox.py,
+note "auto from Gmail", undoable). It never contacts anyone and never submits anything.
 
 - Forward-only transitions (TRANSITIONS). A tracker re-import can't downgrade either (STATUS_RANK).
 - Every change is an append-only ApplicationEventRow (who/when/what/note) plus an audit-log entry, so each

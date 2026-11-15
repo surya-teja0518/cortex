@@ -16,3 +16,5 @@ answers.yaml
 config.local.yaml
 google-service-account.json
 *service-account*.json
+gmail-oauth-client.json
+gmail-token.json

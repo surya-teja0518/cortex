@@ -16,3 +16,5 @@ linkedin_check:
 #     data_engineer: Firstname_Lastname_DataEngineer_Resume.pdf
 #     oracle_dba: Firstname_Lastname_OracleDBA_Resume.pdf
 #     ai_ml: Firstname_Lastname_ML_Resume.pdf
+# gmail:
+#   enabled: true

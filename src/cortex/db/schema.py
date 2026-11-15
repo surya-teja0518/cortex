@@ -179,6 +179,22 @@ class SkillFitRow(Base):
     text_sha: Mapped[str] = mapped_column(String(64))
 
 
+class InboxFindingRow(Base):
+    """One row per Gmail message the inbox watcher has looked at, so it is never read or applied twice.
+    Never the body or the sender address; subject truncated, kept for the CLI/dashboard only. New table."""
+    __tablename__ = "inbox_findings"
+    __table_args__ = (UniqueConstraint("user_id", "message_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    message_id: Mapped[str] = mapped_column(String(64))
+    verdict: Mapped[str | None] = mapped_column(String(16))       # rejected | interview | None (not relevant)
+    job_ids: Mapped[str | None] = mapped_column(Text)              # JSON list
+    auto: Mapped[bool] = mapped_column(default=False)
+    applied: Mapped[bool] = mapped_column(default=False)
+    subject: Mapped[str | None] = mapped_column(String(120))
+    found_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
 def get_session(url: str = "sqlite:///data/cortex.db"):
     engine = create_engine(url)
     Base.metadata.create_all(engine)
