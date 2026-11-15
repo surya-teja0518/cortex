@@ -306,3 +306,24 @@ def test_review_queue_hides_old_postings_view_only(ses):
     assert old.id in {r["id"] for r in review_queue(ses, "u1", today=TODAY)}
     ses.refresh(old)
     assert old.status == "to_apply"                                    # hiding never changes status
+
+
+def test_daily_dry_run_writes_nothing_and_calls_no_llm(ses, tmp_path, monkeypatch, capsys):
+    import yaml
+
+    from cortex import cli
+    from cortex.db.schema import SkillFitRow
+    add(ses, 1, company="Acme")
+    monkeypatch.setenv("CORTEX_DB_URL", f"sqlite:///{tmp_path}/t.db")
+    monkeypatch.setenv("CORTEX_USER_ID", "u1")
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump({**CFG, "llm": {"scorer_profile": False},
+                                                          "scoring": {"bands": BANDS},
+                                                          "sources": {"ats": {"boards": []}}}))
+    never = FakeProvider([])                                                    # any call -> IndexError
+    monkeypatch.setattr(cli, "_build_scorer", lambda *a, **k: LLMScorer(never, NoLimit(), AuditLog("/dev/null"), BANDS))
+    cli.main(["daily", "--dry-run"])
+    out = capsys.readouterr().out
+    assert "would score 1 jobs (no calls made)" in out and "digest: dry run" in out
+    assert never.prompts == []
+    assert ses.query(LLMScoreCacheRow).count() == 0 and ses.query(SkillFitRow).count() == 0
