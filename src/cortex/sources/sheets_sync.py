@@ -68,6 +68,22 @@ def service_account_token(key_file: str) -> str:
     return creds.token
 
 
+def _why_denied(r: httpx.Response) -> str:
+    """Google's own reason for a 401/403, mapped to the fix. Only the status/reason codes are used, never the
+    message text (it can echo request details)."""
+    try:
+        err = r.json().get("error", {})
+    except ValueError:
+        err = {}
+    codes = {str(err.get("status", ""))} | {str(d.get("reason", "")) for d in err.get("details", []) if isinstance(d, dict)}
+    if codes & {"SERVICE_DISABLED", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"} or "accessNotConfigured" in str(err):
+        return ("Google Sheets API is not enabled in the service account's project: Cloud Console -> APIs & Services "
+                "-> Enable APIs and services -> Google Sheets API -> Enable (then wait a minute)")
+    if r.status_code == 401:
+        return "the service account key was rejected: create a new JSON key and replace google-service-account.json"
+    return "share the sheet with the service account's email (client_email in the key file) as Editor"
+
+
 class SheetsClient:
     def __init__(self, spreadsheet_id: str, tab: str, token: str, client: httpx.Client | None = None):
         if not _ID.match(spreadsheet_id or ""):
@@ -90,7 +106,7 @@ class SheetsClient:
         except httpx.HTTPError as e:
             raise SheetsError(type(e).__name__) from None
         if r.status_code in (401, 403):
-            raise SheetsError(f"HTTP {r.status_code}: share the sheet with the service account's email (Editor)")
+            raise SheetsError(f"HTTP {r.status_code}: {_why_denied(r)}")
         if r.status_code == 404:
             raise SheetsError("HTTP 404: spreadsheet or tab not found")
         if r.status_code != 200:

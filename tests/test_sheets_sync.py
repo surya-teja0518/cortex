@@ -153,3 +153,15 @@ def test_daily_sync_failure_is_reported(ses):
     res = run_daily(ses, {}, "u1", date(2026, 11, 14), sync=boom, pull=None, fetch=None, score=None,
                     digest=lambda s, n: seen.setdefault("n", list(n)) and "sent")
     assert res.failed_steps == ["sync"] and "share the sheet" in seen["n"][0]
+
+
+@pytest.mark.parametrize("status,body,want", [
+    (403, {"error": {"status": "PERMISSION_DENIED"}}, "share the sheet"),
+    (403, {"error": {"status": "PERMISSION_DENIED", "details": [{"reason": "SERVICE_DISABLED"}]}}, "not enabled"),
+    (401, {"error": {"status": "UNAUTHENTICATED"}}, "key was rejected"),
+])
+def test_denial_reasons(status, body, want):
+    c = SheetsClient(SID, "Untitled", TOKEN, client=httpx.Client(transport=httpx.MockTransport(
+        lambda r: httpx.Response(status, json=body))))
+    with pytest.raises(SheetsError, match=want):
+        c.get_rows()
