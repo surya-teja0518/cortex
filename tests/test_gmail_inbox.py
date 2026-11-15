@@ -190,3 +190,34 @@ def test_daily_runs_inbox_before_sheet_sync(ses):
     run_daily(ses, {}, "u1", date(2026, 11, 15), inbox=inbox, sync=sync, pull=None, fetch=None, score=None,
               digest=lambda s, n: "sent")
     assert order == ["inbox", "sync"]
+
+
+def test_slow_message_is_retried_then_skipped_not_fatal(ses):
+    acme = job(ses, 1, "Acme")
+    good = gmail_message("m0000001", "Your Acme application", "not moving forward")
+    calls = {"slow": 0}
+
+    def handler(req):
+        if req.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": "m0000001"}, {"id": "m0000002"}]})
+        if req.url.path.endswith("m0000002"):
+            calls["slow"] += 1
+            raise httpx.ReadTimeout("slow")
+        return httpx.Response(200, json=good)
+    c = GmailClient(TOKEN, client=httpx.Client(transport=httpx.MockTransport(handler)), sleep=lambda s: None)
+    r = scan(ses, CFG, "u1", c)
+    assert calls["slow"] == 3 and r.skipped == 1 and r.scanned == 1                 # 3 tries, then skipped
+    assert [jid for jid, *_ in r.applied] == [acme.id]                              # the rest still processed
+    assert ses.query(InboxFindingRow).filter_by(message_id="m0000002").count() == 0  # retried next run
+
+
+def test_auth_failure_still_stops_the_run(ses):
+    job(ses, 1, "Acme")
+
+    def handler(req):
+        if req.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": "m0000001"}]})
+        return httpx.Response(401)
+    c = GmailClient(TOKEN, client=httpx.Client(transport=httpx.MockTransport(handler)), sleep=lambda s: None)
+    with pytest.raises(GmailError, match="401"):
+        scan(ses, CFG, "u1", c)

@@ -32,7 +32,8 @@ def run_daily(session, cfg: dict, user_id: str, today: date, *, fetch: Callable 
             for verdict, companies, why in r.to_check:
                 res.notes.append(f"gmail: check yourself: possible {verdict} from {companies} ({why})")
             if not r.applied and not r.to_check:
-                res.notes.append(f"gmail: {r.scanned} new emails, nothing about your applications")
+                res.notes.append(f"gmail: {r.scanned} new emails, nothing about your applications"
+                                 + (f" ({r.skipped} skipped, retried tomorrow)" if getattr(r, "skipped", 0) else ""))
         except Exception as e:  # noqa: BLE001 — one step failing must not cost the digest
             session.rollback()
             res.failed_steps.append("inbox")

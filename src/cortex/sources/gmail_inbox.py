@@ -214,19 +214,28 @@ def _body_text(part: dict) -> str:
 
 
 class GmailClient:
-    def __init__(self, token: str, client: httpx.Client | None = None):
+    def __init__(self, token: str, client: httpx.Client | None = None, sleep=None):
+        import time
         self._token = token
         self._c = client or httpx.Client(timeout=30)
+        self._sleep = sleep or time.sleep
 
     def __repr__(self) -> str:
         return "GmailClient(token=***)"
 
     def _get(self, url: str, **params):
-        try:
-            r = self._c.get(url, params=params, headers={"Authorization": f"Bearer {self._token}"},
-                            follow_redirects=False)
-        except httpx.HTTPError as e:
-            raise GmailError(type(e).__name__) from None
+        r = None
+        for attempt in range(3):          # Gmail is occasionally slow on one message: retry, don't give up
+            try:
+                r = self._c.get(url, params=params, headers={"Authorization": f"Bearer {self._token}"},
+                                follow_redirects=False)
+                break
+            except (httpx.TimeoutException, httpx.TransportError) as e:
+                if attempt == 2:
+                    raise GmailError(type(e).__name__) from None
+                self._sleep(2 * (attempt + 1))
+            except httpx.HTTPError as e:
+                raise GmailError(type(e).__name__) from None
         if r.status_code in (401, 403):
             raise GmailError(f"HTTP {r.status_code}: Gmail access denied (re-run `cortex gmail-auth`; is the Gmail "
                              "API enabled in your Cortex Cloud project?)")
@@ -251,6 +260,7 @@ class GmailClient:
 @dataclass
 class InboxResult:
     scanned: int = 0
+    skipped: int = 0         # messages that kept failing to download: not recorded, so tried again next run
     applied: list[tuple[int, str, str, str]] = field(default_factory=list)    # job id, verdict, company, title
     to_check: list[tuple[str, str, str]] = field(default_factory=list)        # verdict, company(s), why
 
@@ -265,7 +275,13 @@ def scan(session, cfg: dict, user_id: str, client: GmailClient, *, dry_run: bool
     for mid in client.recent_ids(int(gc.get("lookback_days", 3))):
         if mid in seen:
             continue
-        mail = client.message(mid)
+        try:
+            mail = client.message(mid)
+        except GmailError as e:
+            if str(e).startswith("HTTP 4") and ("401" in str(e) or "403" in str(e)):
+                raise                          # auth problems stop the run (every message would fail)
+            res.skipped += 1
+            continue
         res.scanned += 1
         f = decide(mail, active)
         row = InboxFindingRow(user_id=user_id, message_id=mid, found_at=datetime.now(UTC))
@@ -293,7 +309,8 @@ def scan(session, cfg: dict, user_id: str, client: GmailClient, *, dry_run: bool
     else:
         session.commit()
     if audit:
-        audit.log("gmail_inbox", "scan", user_id=user_id, scanned=res.scanned, applied=len(res.applied),
+        audit.log("gmail_inbox", "scan", user_id=user_id, scanned=res.scanned, skipped=res.skipped,
+                  applied=len(res.applied),
                   to_check=len(res.to_check), dry_run=dry_run)
     return res
 
