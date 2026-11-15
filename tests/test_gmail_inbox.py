@@ -234,3 +234,46 @@ def test_tech_word_company_only_matches_by_sender(ses):
     real = decide(mail("Your Oracle application", "regret to inform you", sender="Oracle Talent <talent@oracle.com>"),
                   [oracle, zensar])
     assert real.auto and real.job_ids == [oracle.id]
+
+
+def _err(status, reason, headers=None):
+    return httpx.Response(status, headers=headers or {}, json={"error": {"code": status, "message": "secret-ish detail",
+                                                                         "errors": [{"reason": reason}]}})
+
+
+def test_rate_limit_403_waits_and_retries_not_access_denied(ses):
+    acme = job(ses, 1, "Acme")
+    good = gmail_message("m0000001", "Your Acme application", "not moving forward")
+    hits, slept = {"n": 0}, []
+
+    def handler(req):
+        if req.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": "m0000001"}]})
+        hits["n"] += 1
+        return _err(403, "userRateLimitExceeded", {"retry-after": "3"}) if hits["n"] < 3 else httpx.Response(200, json=good)
+    c = GmailClient(TOKEN, client=httpx.Client(transport=httpx.MockTransport(handler)), sleep=slept.append)
+    r = scan(ses, CFG, "u1", c)
+    assert [jid for jid, *_ in r.applied] == [acme.id] and slept == [3.0, 3.0]
+
+
+def test_persistent_rate_limit_stops_but_keeps_what_was_read(ses):
+    job(ses, 1, "Acme")
+    good = gmail_message("m0000001", "Acme newsletter", "hello")
+
+    def handler(req):
+        if req.url.path.endswith("/messages"):
+            return httpx.Response(200, json={"messages": [{"id": "m0000001"}, {"id": "m0000002"}]})
+        return httpx.Response(200, json=good) if req.url.path.endswith("m0000001") else _err(429, "rateLimitExceeded")
+    c = GmailClient(TOKEN, client=httpx.Client(transport=httpx.MockTransport(handler)), sleep=lambda s: None)
+    with pytest.raises(GmailError, match="rate limit") as e:
+        scan(ses, CFG, "u1", c)
+    assert "secret-ish" not in str(e.value)
+    assert ses.query(InboxFindingRow).filter_by(message_id="m0000001").count() == 1      # kept
+    assert ses.query(InboxFindingRow).filter_by(message_id="m0000002").count() == 0      # read next run
+
+
+def test_real_permission_403_names_googles_reason():
+    c = GmailClient(TOKEN, client=httpx.Client(transport=httpx.MockTransport(
+        lambda r: _err(403, "insufficientPermissions"))), sleep=lambda s: None)
+    with pytest.raises(GmailError, match=r"access denied \(insufficientPermissions\)"):
+        c.recent_ids(3)
