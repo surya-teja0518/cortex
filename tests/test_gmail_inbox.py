@@ -331,3 +331,49 @@ def test_scan_lists_untitled_rejection_for_checking(ses):
     ses.refresh(cisco)
     assert r.applied == [] and cisco.status == "applied"
     assert r.to_check == [("rejected", "Cisco", "email doesn't name the job title you applied for")]
+
+
+# ---------- paging (2026-11-17: only the first 200 ids were read) ----------
+
+def paged_handler(n_ids, pages_seen, page=2):
+    ids = [f"m{i:07d}" for i in range(n_ids)]
+    msg = gmail_message("x", "Newsletter", "hello")
+
+    def handler(req):
+        if req.url.path.endswith("/messages"):
+            pages_seen.append(dict(req.url.params))
+            start = int(req.url.params.get("pageToken", "0"))
+            size = min(page, int(req.url.params["maxResults"]))
+            body = {"messages": [{"id": i} for i in ids[start:start + size]]}
+            if start + size < len(ids):
+                body["nextPageToken"] = str(start + size)
+            return httpx.Response(200, json=body)
+        return httpx.Response(200, json=msg)
+    return handler
+
+
+def test_recent_ids_follows_pages():
+    pages = []
+    c = GmailClient(TOKEN, client=httpx.Client(transport=httpx.MockTransport(paged_handler(5, pages))))
+    assert c.recent_ids(30) == [f"m{i:07d}" for i in range(5)]
+    assert [p.get("pageToken") for p in pages] == [None, "2", "4"]
+
+
+def test_recent_ids_stops_at_limit_and_on_bad_token():
+    pages = []
+    c = GmailClient(TOKEN, client=httpx.Client(transport=httpx.MockTransport(paged_handler(10, pages))))
+    assert len(c.recent_ids(30, limit=3)) == 3 and pages[-1]["maxResults"] == "1"
+    bad = lambda r: httpx.Response(200, json={"messages": [{"id": "m0000001"}], "nextPageToken": "../x?y"})
+    c = GmailClient(TOKEN, client=httpx.Client(transport=httpx.MockTransport(bad)))
+    assert c.recent_ids(30) == ["m0000001"]                                  # odd token: stop, don't loop
+
+
+def test_scan_reads_every_page_flags_cap_and_honours_days(ses):
+    pages = []
+    c = GmailClient(TOKEN, client=httpx.Client(transport=httpx.MockTransport(paged_handler(5, pages))))
+    r = scan(ses, CFG, "u1", c, dry_run=True, days=30)
+    assert r.scanned == 5 and not r.capped and "newer_than:30d" in pages[0]["q"]
+    pages.clear()
+    capped = {"gmail": {**CFG["gmail"], "max_messages": 3}}
+    r = scan(ses, capped, "u1", c, dry_run=True)
+    assert r.scanned == 3 and r.capped and "newer_than:3d" in pages[0]["q"]

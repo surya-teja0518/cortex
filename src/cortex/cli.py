@@ -114,10 +114,13 @@ def cmd_inbox(a, uid):
     from cortex.sources.gmail_inbox import GmailError, client_from_config, scan
     cfg = load_config(a.config)
     try:
-        r = scan(_session(), cfg, uid, client_from_config(cfg), dry_run=a.dry_run, audit=AuditLog())
+        r = scan(_session(), cfg, uid, client_from_config(cfg), dry_run=a.dry_run, audit=AuditLog(),
+                 days=a.days)
     except GmailError as e:
         raise SystemExit(f"inbox check failed: {e}") from None
     print(f"emails checked: {r.scanned}" + (f" ({r.skipped} slow to download: retried next run)" if r.skipped else ""))
+    if r.capped:
+        print("  WARNING: hit gmail.max_messages; older mail in the window was not read")
     for jid, verdict, company, title in r.applied:
         print(f"  {'would mark' if a.dry_run else 'marked'} {verdict}: [{jid}] {company} | {title}"
               + ("" if a.dry_run else f"   (undo: cortex undo {jid})"))
@@ -575,6 +578,7 @@ def main(argv=None):
     ga.set_defaults(fn=cmd_gmail_auth)
     ib = sub.add_parser("inbox", help="find rejection / interview emails for your applications and record them")
     ib.add_argument("--dry-run", action="store_true", help="show what it would record; record nothing")
+    ib.add_argument("--days", type=int, help="look back N days (default gmail.lookback_days)")
     ib.set_defaults(fn=cmd_inbox)
     pl = sub.add_parser("pull", help="read SYNAPSE's recent Apify datasets (APIFY_TOKEN in .env); never starts runs")
     pl.add_argument("--dry-run", action="store_true", help="show what would be added; save nothing")
