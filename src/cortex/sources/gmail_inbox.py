@@ -34,6 +34,8 @@ SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
 API = "https://gmail.googleapis.com/gmail/v1/users/me"
 MAX_TEXT = 50_000
 _ID = re.compile(r"^[A-Za-z0-9_-]{6,64}$")
+_PAGE = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
+MAX_MESSAGES = 2000          # per run; config gmail.max_messages
 
 REJECT_STRONG = [
     r"not (be )?moving forward", r"move forward with other candidates", r"(decided|chosen) to (pursue|proceed with|move forward with) other",
@@ -316,10 +318,24 @@ class GmailClient:
                 raise GmailError(type(e).__name__) from None
         raise AssertionError("unreachable")
 
-    def recent_ids(self, days: int, limit: int = 200) -> list[str]:
+    def recent_ids(self, days: int, limit: int = MAX_MESSAGES) -> list[str]:
+        """Ids of every message in the window, newest first, following nextPageToken (Gmail returns at most
+        500 per page; before 2026-11-17 only the first page of 200 was read, so long lookbacks lost older mail).
+        Stops at `limit`: the caller treats len == limit as 'maybe more'."""
         q = f"newer_than:{int(days)}d -category:promotions -category:social -category:forums"
-        data = self._get(f"{API}/messages", q=q, maxResults=min(limit, 500))
-        return [m["id"] for m in (data.get("messages") or []) if isinstance(m, dict) and _ID.match(str(m.get("id", "")))]
+        ids: list[str] = []
+        token = None
+        while len(ids) < limit:
+            params = {"q": q, "maxResults": min(limit - len(ids), 500)}
+            if token:
+                params["pageToken"] = token
+            data = self._get(f"{API}/messages", **params)
+            ids += [m["id"] for m in (data.get("messages") or [])
+                    if isinstance(m, dict) and _ID.match(str(m.get("id", "")))]
+            token = data.get("nextPageToken")
+            if not (isinstance(token, str) and _PAGE.match(token)):
+                break
+        return ids[:limit]
 
     def message(self, mid: str) -> Mail:
         if not _ID.match(mid):
@@ -334,19 +350,23 @@ class GmailClient:
 class InboxResult:
     scanned: int = 0
     skipped: int = 0         # messages that kept failing to download: not recorded, so tried again next run
+    capped: bool = False     # hit gmail.max_messages: older mail in the window was not read
     applied: list[tuple[int, str, str, str]] = field(default_factory=list)    # job id, verdict, company, title
     to_check: list[tuple[str, str, str]] = field(default_factory=list)        # verdict, company(s), why
 
 
 def scan(session, cfg: dict, user_id: str, client: GmailClient, *, dry_run: bool = False,
-         audit: AuditLog | None = None) -> InboxResult:
+         audit: AuditLog | None = None, days: int | None = None) -> InboxResult:
     gc = cfg.get("gmail") or {}
     seen = set(session.scalars(select(InboxFindingRow.message_id).where(InboxFindingRow.user_id == user_id)))
     active = list(session.scalars(select(JobRow).where(JobRow.user_id == user_id, JobRow.status.in_(ACTIVE),
                                                        JobRow.dup_of_id.is_(None))))
     res = InboxResult()
     stop: GmailError | None = None
-    for mid in client.recent_ids(int(gc.get("lookback_days", 3))):
+    cap = int(gc.get("max_messages", MAX_MESSAGES))
+    ids = client.recent_ids(int(days or gc.get("lookback_days", 3)), limit=cap)
+    res.capped = len(ids) >= cap
+    for mid in ids:
         if mid in seen:
             continue
         try:
@@ -386,7 +406,7 @@ def scan(session, cfg: dict, user_id: str, client: GmailClient, *, dry_run: bool
     if audit:
         audit.log("gmail_inbox", "scan", user_id=user_id, scanned=res.scanned, skipped=res.skipped,
                   applied=len(res.applied),
-                  to_check=len(res.to_check), dry_run=dry_run, stopped=bool(stop))
+                  to_check=len(res.to_check), dry_run=dry_run, stopped=bool(stop), capped=res.capped)
     if stop is not None:
         raise stop
     return res

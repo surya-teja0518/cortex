@@ -115,6 +115,7 @@ sheets:
 gmail:
   enabled: false
   lookback_days: 3
+  max_messages: 2000      # per run; Gmail ids are paged (500 a page)
   client_file: gmail-oauth-client.json
   token_file: gmail-token.json
 
