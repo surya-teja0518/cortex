@@ -5,8 +5,8 @@ Approved by Surya on 2026-11-15 (AGENTS.md, GMAIL INBOX), with these rules enfor
 - Classification is LOCAL, plain rules, NO LLM: email content never leaves his Mac and never reaches a prompt.
   Email text is untrusted input; it is only searched for phrases, never executed or followed.
 - AUTO-UPDATE only when unambiguous: a STRONG phrase ("not moving forward", "schedule an interview") AND the email
-  names exactly ONE company he has an active application at (applied / interview) AND that company has exactly one
-  active application. Anything else (several applications at that company, only a weak word like
+  names exactly ONE company he has an active application at (applied / interview), in the subject or sender, AND that
+  company has exactly one active application AND the email names that application's job title. Anything else (several applications at that company, only a weak word like
   "unfortunately", both rejection and interview language) is a suggestion in the digest, never a tracker change.
 - Every auto-update is an ordinary tracker event (`cortex undo <id>` reverts it) with the note "auto from Gmail".
 - Stored per message: message id, verdict, matched job ids, whether it was applied. Never the body, never the
@@ -159,7 +159,32 @@ def decide(mail: Mail, active: list[JobRow]) -> Finding | None:
     key, jobs = next(iter(found.items()))
     if not _named(key, jobs[0].company, f"{mail.subject} {mail.sender}"):   # only deep in the body: don't act
         return Finding(mail.id, verdict, ids, False, "company only mentioned in the body", mail.subject)
+    if not title_named(jobs[0].title, f"{mail.subject}\n{mail.text}"):
+        return Finding(mail.id, verdict, ids, False, "email doesn't name the job title you applied for", mail.subject)
     return Finding(mail.id, verdict, ids, True, "clear match", mail.subject)
+
+
+_LEVEL_WORDS = {"senior", "sr", "junior", "jr", "associate", "i", "ii", "iii", "iv", "v", "1", "2", "3", "4"}
+
+
+def _title_core(title: str) -> list[str]:
+    """Title words that must appear in the email: the part before a separator ('Data Engineer - Azure',
+    'DBA (Remote)', 'Engineer | Bangalore'), without leading/trailing level words ('Senior', 'II').
+    Empty when too short to be a real signal."""
+    main = re.split(r"\s[-–—|/:]\s|[(\[,|]", title or "")[0]
+    toks = _tokens(main)
+    while toks and toks[0] in _LEVEL_WORDS:
+        toks.pop(0)
+    while toks and toks[-1] in _LEVEL_WORDS:
+        toks.pop()
+    return toks if len("".join(toks)) >= 5 else []
+
+
+def title_named(title: str, text: str) -> bool:
+    """The application's job title appears in the email, its words in order (seen 2026-11-17: a Workday
+    rejection named 'Database Administrator (Req. ...)'). Unknown/too-short titles never count."""
+    core = _title_core(title)
+    return bool(core) and f" {' '.join(core)} " in " " + " ".join(_tokens(text)) + " "
 
 
 # ---------- Gmail API (read only) ----------

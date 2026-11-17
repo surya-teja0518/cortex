@@ -57,7 +57,7 @@ def test_classify(text, want):
 
 def test_clear_rejection_is_auto(ses):
     acme = job(ses, 1, "Acme Technologies Pvt Ltd")
-    f = decide(mail("Your application to Acme Technologies", "we will not be moving forward"), [acme])
+    f = decide(mail("Your application to Acme Technologies", "Re: Data Engineer. we will not be moving forward"), [acme])
     assert f.auto and f.verdict == "rejected" and f.job_ids == [acme.id]
 
 
@@ -137,9 +137,10 @@ def test_scan_records_clear_ones_lists_the_rest_and_never_twice(ses, tmp_path):
     wf1, wf2 = job(ses, 2, "Wells Fargo"), job(ses, 3, "Wells Fargo", title="DE II")
     gamma = job(ses, 4, "Gamma Labs")
     f = FakeGmail([
-        gmail_message("m0000001", "Your Acme application", "We will not be moving forward. Secret body text."),
+        gmail_message("m0000001", "Your Acme application", "Data Engineer: we will not be moving forward. Secret body text."),
         gmail_message("m0000002", "Wells Fargo", "not moving forward", sender="wf@wellsfargo.com"),
-        gmail_message("m0000003", "Gamma Labs: next steps", "We'd like to schedule a call", sender="hr@gammalabs.io"),
+        gmail_message("m0000003", "Gamma Labs: Data Engineer next steps", "We'd like to schedule a call",
+                      sender="hr@gammalabs.io"),
         gmail_message("m0000004", "Newsletter", "hello"),
     ])
     a = AuditLog(str(tmp_path / "a.log"))
@@ -162,7 +163,7 @@ def test_scan_records_clear_ones_lists_the_rest_and_never_twice(ses, tmp_path):
 
 def test_scan_dry_run_records_nothing(ses):
     acme = job(ses, 1, "Acme")
-    f = FakeGmail([gmail_message("m0000001", "Your Acme application", "not moving forward")])
+    f = FakeGmail([gmail_message("m0000001", "Your Acme Data Engineer application", "not moving forward")])
     r = scan(ses, CFG, "u1", f.client(), dry_run=True)
     ses.refresh(acme)
     assert r.applied and acme.status == "applied" and ses.query(InboxFindingRow).count() == 0
@@ -170,12 +171,12 @@ def test_scan_dry_run_records_nothing(ses):
 
 def test_already_rejected_job_is_left_alone(ses):
     acme = job(ses, 1, "Acme", status="interview")
-    f = FakeGmail([gmail_message("m0000001", "Acme", "Please complete the HackerRank test")])
+    f = FakeGmail([gmail_message("m0000001", "Acme", "Data Engineer: please complete the HackerRank test")])
     r = scan(ses, CFG, "u1", f.client())                                  # interview -> interview: another round
     assert [v for _, v, _, _ in r.applied] == ["interview"]
     acme.status = "offer"
     ses.commit()
-    f2 = FakeGmail([gmail_message("m0000002", "Acme", "regret to inform you")])
+    f2 = FakeGmail([gmail_message("m0000002", "Acme", "Data Engineer: regret to inform you")])
     assert scan(ses, CFG, "u1", f2.client()).applied == []                # offer is final: no change, no crash
 
 
@@ -194,7 +195,7 @@ def test_daily_runs_inbox_before_sheet_sync(ses):
 
 def test_slow_message_is_retried_then_skipped_not_fatal(ses):
     acme = job(ses, 1, "Acme")
-    good = gmail_message("m0000001", "Your Acme application", "not moving forward")
+    good = gmail_message("m0000001", "Your Acme Data Engineer application", "not moving forward")
     calls = {"slow": 0}
 
     def handler(req):
@@ -231,7 +232,8 @@ def test_tech_word_company_only_matches_by_sender(ses):
     assert f.auto and f.job_ids == [zensar.id]                                   # not Oracle
     only_oracle = decide(m, [oracle])
     assert only_oracle is None                                                  # Zensar email can't touch Oracle
-    real = decide(mail("Your Oracle application", "regret to inform you", sender="Oracle Talent <talent@oracle.com>"),
+    real = decide(mail("Your Oracle application", "Database Engineer: regret to inform you",
+                       sender="Oracle Talent <talent@oracle.com>"),
                   [oracle, zensar])
     assert real.auto and real.job_ids == [oracle.id]
 
@@ -243,7 +245,7 @@ def _err(status, reason, headers=None):
 
 def test_rate_limit_403_waits_and_retries_not_access_denied(ses):
     acme = job(ses, 1, "Acme")
-    good = gmail_message("m0000001", "Your Acme application", "not moving forward")
+    good = gmail_message("m0000001", "Your Acme Data Engineer application", "not moving forward")
     hits, slept = {"n": 0}, []
 
     def handler(req):
@@ -277,3 +279,55 @@ def test_real_permission_403_names_googles_reason():
         lambda r: _err(403, "insufficientPermissions"))), sleep=lambda s: None)
     with pytest.raises(GmailError, match=r"access denied \(insufficientPermissions\)"):
         c.recent_ids(3)
+
+
+# ---------- job title must be named too (2026-11-17: Workday rejection Surya didn't recall) ----------
+
+def test_company_without_title_is_only_a_suggestion(ses):
+    cisco = job(ses, 1, "Cisco", title="Database Administrator")
+    f = decide(mail("Thanks for Considering Cisco", "we regret to inform you we won't be moving forward",
+                    sender="Cisco <cisco@myworkday.com>"), [cisco])
+    assert not f.auto and f.job_ids == [cisco.id] and "job title" in f.why
+
+
+def test_company_title_and_strong_phrase_is_auto(ses):
+    cisco = job(ses, 1, "Cisco", title="Database Administrator")
+    f = decide(mail("Thanks for Considering Cisco",
+                    "Thank you for your interest in the Database Administrator (Req. 2016012). "
+                    "We regret to inform you that we won't be moving forward with you.",
+                    sender="Cisco <cisco@myworkday.com>"), [cisco])
+    assert f.auto and f.verdict == "rejected" and f.job_ids == [cisco.id]
+
+
+def test_title_must_be_the_applications_title(ses):
+    acme = job(ses, 1, "Acme", title="Data Engineer")
+    f = decide(mail("Your Acme application", "For the Database Administrator role: not moving forward"), [acme])
+    assert not f.auto                                                       # a different role at Acme
+    words_apart = decide(mail("Your Acme application", "data team: the engineer role is not moving forward"),
+                         [acme])
+    assert not words_apart.auto                                             # words must be in order
+
+
+@pytest.mark.parametrize("title,text,want", [
+    ("Senior Data Engineer - Azure", "the Data Engineer position", True),        # level + suffix dropped
+    ("Data Engineer II", "your application for Data Engineer", True),
+    ("Oracle DBA (Remote)", "re: Oracle DBA, Hyderabad", True),
+    ("Data Engineer", "Senior Data Engineer opening", True),
+    ("Data Engineer", "Database Engineer opening", False),
+    ("DBA", "the DBA role", False),                                             # too short to trust
+    ("", "anything", False),
+    ("Senior II", "senior ii", False),                                          # only level words
+])
+def test_title_named(title, text, want):
+    from cortex.sources.gmail_inbox import title_named
+    assert title_named(title, text) is want
+
+
+def test_scan_lists_untitled_rejection_for_checking(ses):
+    cisco = job(ses, 1, "Cisco", title="Database Administrator")
+    f = FakeGmail([gmail_message("m0000001", "Thanks for Considering Cisco", "regret to inform you",
+                                 sender="Cisco <cisco@myworkday.com>")])
+    r = scan(ses, CFG, "u1", f.client())
+    ses.refresh(cisco)
+    assert r.applied == [] and cisco.status == "applied"
+    assert r.to_check == [("rejected", "Cisco", "email doesn't name the job title you applied for")]
