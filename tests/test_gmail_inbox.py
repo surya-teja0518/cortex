@@ -377,3 +377,36 @@ def test_scan_reads_every_page_flags_cap_and_honours_days(ses):
     capped = {"gmail": {**CFG["gmail"], "max_messages": 3}}
     r = scan(ses, capped, "u1", c, dry_run=True)
     assert r.scanned == 3 and r.capped and "newer_than:3d" in pages[0]["q"]
+
+
+# ---------- shortlisted: moved forward, nobody asking for anything yet (2026-11-19, Verdantas) ----------
+
+VERDANTAS = ("Dear Surya, You have successfully cleared the last round and have been moved to the next round "
+             "Screening for the role Data Engineer (Migration) at Verdantas - India Careers. "
+             "No action is required from your end.")
+
+
+@pytest.mark.parametrize("text,want", [
+    (VERDANTAS, ("shortlisted", True)),
+    ("Congratulations, you have been shortlisted for the role", ("shortlisted", True)),
+    ("You've been shortlisted. Please share your availability for a call", ("interview", True)),   # interview wins
+    ("You progressed to the next stage, but unfortunately the role closed", (None, False)),       # mixed
+])
+def test_classify_shortlist(text, want):
+    assert classify(text) == want
+
+
+def test_verdantas_style_email_marks_shortlisted_not_interview(ses):
+    v = job(ses, 1, "Verdantas", title="Data Engineer (Migration)")
+    f = FakeGmail([gmail_message("m0000001", "Job Application Status", VERDANTAS, sender="Verdantas <no-reply@verdantas.com>")])
+    r = scan(ses, CFG, "u1", f.client())
+    ses.refresh(v)
+    assert [x[1] for x in r.applied] == ["shortlisted"] and v.status == "shortlisted"
+
+
+def test_shortlist_email_never_downgrades_an_interview(ses):
+    v = job(ses, 1, "Verdantas", status="interview", title="Data Engineer (Migration)")
+    f = FakeGmail([gmail_message("m0000001", "Job Application Status", VERDANTAS, sender="hr@verdantas.com")])
+    assert scan(ses, CFG, "u1", f.client()).applied == []
+    ses.refresh(v)
+    assert v.status == "interview"
