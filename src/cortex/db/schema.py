@@ -195,7 +195,33 @@ class InboxFindingRow(Base):
     found_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
+def db_url(url: str) -> str:
+    """Normalize a database URL. Neon/Heroku-style postgres:// and plain postgresql:// use the psycopg 3
+    driver (the `[postgres]` extra); sqlite URLs pass through unchanged."""
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
+
+def is_postgres(url: str) -> bool:
+    return db_url(url).startswith("postgresql")
+
+
+_ENGINES: dict[str, object] = {}
+
+
+def get_engine(url: str = "sqlite:///data/cortex.db"):
+    """One engine per URL per process. Postgres (Neon) closes idle connections, so the pool pings before use
+    and recycles after 5 minutes."""
+    url = db_url(url)
+    if url not in _ENGINES:
+        kw = {"pool_pre_ping": True, "pool_recycle": 300} if is_postgres(url) else {}
+        engine = create_engine(url, **kw)
+        Base.metadata.create_all(engine)
+        _ENGINES[url] = engine
+    return _ENGINES[url]
+
+
 def get_session(url: str = "sqlite:///data/cortex.db"):
-    engine = create_engine(url)
-    Base.metadata.create_all(engine)
-    return sessionmaker(engine)()
+    return sessionmaker(get_engine(url))()

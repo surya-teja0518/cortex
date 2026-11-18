@@ -13,6 +13,7 @@ ui = ["streamlit>=1.40"]
 workday = ["playwright>=1.48"]
 sheets = ["google-auth>=2.30", "requests>=2.32"]
 gmail = ["google-auth>=2.30", "requests>=2.32", "google-auth-oauthlib>=1.2"]
+postgres = ["psycopg[binary]>=3.2", "langgraph-checkpoint-postgres>=2.0"]
 
 [project.scripts]
 cortex = "cortex.cli:main"
