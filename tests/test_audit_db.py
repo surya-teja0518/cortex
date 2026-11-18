@@ -63,3 +63,19 @@ def test_concurrent_devices_never_fork_the_chain(tmp_path):
         t.join()
     recs = log.records()
     assert len(recs) == 40 and log.verify()
+
+
+def test_append_many_checks_the_whole_chain_before_writing(tmp_path):
+    f = AuditLog(str(tmp_path / "audit.log"))
+    for i in range(7):
+        f.log("tracker", "status", job_id=i)
+    recs = f.records()
+    log, _ = db_log(tmp_path)
+    broken = [dict(r) for r in recs]
+    broken[4]["details"] = {"job_id": 99}                       # tampered in the middle
+    with pytest.raises(ValueError, match="continue the chain"):
+        log._db.append_many(broken, batch=2)
+    assert log.records() == []                                  # nothing written, not even the good first part
+    assert log._db.append_many(recs, batch=3) == 7 and log.verify()
+    log.log("tracker", "status", job_id=8)
+    assert log.verify() and len(log.records()) == 8
