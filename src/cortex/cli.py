@@ -463,7 +463,7 @@ def cmd_workday_fill(a, uid):
 
 
 def cmd_track(a, uid):
-    """Record what happened: applied / interview / offer / rejected. Forward-only, audit-logged."""
+    """Record what happened: applied / shortlisted / interview / offer / rejected. Forward-only, audit-logged."""
     from datetime import date
 
     from cortex.agents.tracker import TrackerError, update_status
@@ -631,7 +631,7 @@ def main(argv=None):
     k.add_argument("--master", default="master_resume.yaml")
     k.add_argument("--contact", default="contact.yaml")
     k.set_defaults(fn=cmd_packet)
-    for status in ("applied", "interview", "offer", "rejected", "no_response"):
+    for status in ("applied", "shortlisted", "interview", "offer", "rejected", "no_response"):
         s = sub.add_parser(status.replace("_", "-"), help=f"record: job is now {status}")
         s.add_argument("job_id", type=int)
         s.add_argument("--note", default=None)

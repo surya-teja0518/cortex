@@ -1,6 +1,6 @@
 """Tracker agent: the last pipeline step. Records what Surya did with each job and what happened next.
 
-It records decisions he reports (applied / interview / offer / rejected), plus, since 2026-11-15 and by his
+It records decisions he reports (applied / shortlisted / interview / offer / rejected), plus, since 2026-11-15 and by his
 decision, unambiguous rejection/interview emails found by the read-only Gmail watcher (sources/gmail_inbox.py,
 note "auto from Gmail", undoable). It never contacts anyone and never submits anything.
 
@@ -8,7 +8,7 @@ note "auto from Gmail", undoable). It never contacts anyone and never submits an
 - Every change is an append-only ApplicationEventRow (who/when/what/note) plus an audit-log entry, so each
   job has a full history. jobs.status/applied_date stay the current view the rest of CORTEX reads, which
   means every update is also a new eval label.
-- Follow-ups: applied/interview jobs with no event for N days (config tracker.followup_days).
+- Follow-ups: applied/shortlisted/interview jobs with no event for N days (config tracker.followup_days).
 """
 from collections import Counter
 from dataclasses import dataclass
@@ -23,14 +23,17 @@ TRANSITIONS = {
     "to_apply": {"applied"},
     "approved": {"applied"},          # packet built in CORTEX, now applied by hand
     "pending_approval": {"applied"},  # applied without waiting for the packet: allowed, it's his call
-    "applied": {"interview", "rejected", "no_response"},
+    "applied": {"shortlisted", "interview", "rejected", "no_response"},
+    # shortlisted (2026-11-19, Surya): the employer moved him forward (ATS "next round", "shortlisted")
+    # but no recruiter has contacted him yet. Between applied and interview.
+    "shortlisted": {"shortlisted", "interview", "offer", "rejected", "no_response"},
     "interview": {"interview", "offer", "rejected", "no_response"},   # interview -> interview = another round
     "offer": set(),
     "rejected": set(),
     "no_response": set(),            # written off by Surya; final
 }
-ACTIVE = ("applied", "interview")
-FUNNEL = ("applied", "interview", "offer", "rejected", "no_response")
+ACTIVE = ("applied", "shortlisted", "interview")
+FUNNEL = ("applied", "shortlisted", "interview", "offer", "rejected", "no_response")
 UNDO = "undo"   # event status for a correction; note starts with "reverted #<event id>"
 
 
@@ -94,7 +97,14 @@ def undo(session, user_id: str, job_id: int, *, note: str | None = None, audit: 
         raise TrackerError(f"job is {job.status!r} but the last recorded change is {target.status!r}; not undoing")
     if len(live) > 1:
         prev = live[-2].status
-    else:   # first change: go back to where it came from
+    elif target.status in TRANSITIONS["applied"]:
+        # first CORTEX event on a job whose 'applied' came from the sheet import (no event of its own):
+        # it was applied before this (bug until 2026-11-19: it went back to to_apply). Events don't store the
+        # old status, so an imported 'interview' followed by a rejection also comes back as 'applied'.
+        prev = "applied"
+    elif target.status != "applied":
+        prev = "interview"     # offer: only reachable from interview (or shortlisted, which ranks lower)
+    else:   # first change was 'applied': go back to where it came from
         from cortex.db.schema import TailoredResumeRow
         approved = session.scalar(select(TailoredResumeRow.id).where(
             TailoredResumeRow.user_id == user_id, TailoredResumeRow.job_id == job_id,

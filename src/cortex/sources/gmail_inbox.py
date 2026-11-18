@@ -1,11 +1,11 @@
-"""Gmail inbox watcher: spot rejection / interview emails for jobs Surya applied to and update the tracker.
+"""Gmail inbox watcher: spot rejection / shortlist / interview emails for jobs Surya applied to and update the tracker.
 Approved by Surya on 2026-11-15 (AGENTS.md, GMAIL INBOX), with these rules enforced in code:
 
 - READ ONLY: Gmail API with the `gmail.readonly` scope (Google enforces it), recent days only, primary inbox.
 - Classification is LOCAL, plain rules, NO LLM: email content never leaves his Mac and never reaches a prompt.
   Email text is untrusted input; it is only searched for phrases, never executed or followed.
 - AUTO-UPDATE only when unambiguous: a STRONG phrase ("not moving forward", "schedule an interview") AND the email
-  names exactly ONE company he has an active application at (applied / interview), in the subject or sender, AND that
+  names exactly ONE company he has an active application at (applied / shortlisted / interview), in the subject or sender, AND that
   company has exactly one active application AND the email names that application's job title. Anything else (several applications at that company, only a weak word like
   "unfortunately", both rejection and interview language) is a suggestion in the digest, never a tracker change.
 - Every auto-update is an ordinary tracker event (`cortex undo <id>` reverts it) with the note "auto from Gmail".
@@ -47,8 +47,14 @@ REJECT_WEAK = [r"\bunfortunately\b"]
 INTERVIEW_STRONG = [
     r"schedule (a|an|your) (call|interview|chat|conversation|discussion)", r"invite you (to|for) (an? )?interview",
     r"interview (invitation|invite|slot|schedule)", r"(online|technical|coding) (assessment|test)",
-    r"hackerrank|codility|hackerearth|codesignal|mettl", r"shortlisted", r"share your availability",
-    r"next round", r"move (you )?forward to the next",
+    r"hackerrank|codility|hackerearth|codesignal|mettl", r"share your availability",
+]
+# moved forward by the employer's system, no person asking for anything yet (2026-11-19: Verdantas "moved to the
+# next round Screening... No action is required from your end" was recorded as an interview)
+SHORTLIST_STRONG = [
+    r"\bshortlisted\b", r"next (round|stage|step) of (the|our) (hiring|recruitment|selection|interview) process",
+    r"moved (you )?(forward )?to the next (round|stage|step)", r"move (you )?forward to the next (round|stage|step)",
+    r"cleared the (last|previous|first|initial) round", r"progressed to the next (round|stage|step)",
 ]
 # job-alert senders: never about an application of his
 SKIP_SENDERS = ("jobalerts-noreply@linkedin.com", "jobs-listings@linkedin.com", "alerts@naukri.com",
@@ -57,6 +63,7 @@ SKIP_SENDERS = ("jobalerts-noreply@linkedin.com", "jobs-listings@linkedin.com", 
 _REJ_S = [re.compile(p, re.IGNORECASE) for p in REJECT_STRONG]
 _REJ_W = [re.compile(p, re.IGNORECASE) for p in REJECT_WEAK]
 _INT_S = [re.compile(p, re.IGNORECASE) for p in INTERVIEW_STRONG]
+_SHORT_S = [re.compile(p, re.IGNORECASE) for p in SHORTLIST_STRONG]
 
 
 class GmailError(Exception):
@@ -74,7 +81,7 @@ class Mail:
 @dataclass
 class Finding:
     message_id: str
-    verdict: str            # rejected | interview
+    verdict: str            # rejected | shortlisted | interview
     job_ids: list[int]
     auto: bool
     why: str
@@ -84,16 +91,20 @@ class Finding:
 # ---------- pure decisions ----------
 
 def classify(text: str) -> tuple[str | None, bool]:
-    """(verdict, strong). Both rejection and interview language -> (None, False): too mixed to call."""
+    """(verdict, strong). Both rejection and progress (interview / shortlist) language -> (None, False): too
+    mixed to call. Interview language beats shortlist language ("shortlisted, share your availability")."""
     rej = any(r.search(text) for r in _REJ_S)
     weak_rej = any(r.search(text) for r in _REJ_W)
     inter = any(r.search(text) for r in _INT_S)
-    if (rej or weak_rej) and inter:
+    short = any(r.search(text) for r in _SHORT_S)
+    if (rej or weak_rej) and (inter or short):
         return None, False
     if rej:
         return "rejected", True
     if inter:
         return "interview", True
+    if short:
+        return "shortlisted", True
     if weak_rej:
         return "rejected", False
     return None, False

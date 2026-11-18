@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 Track = Literal["data", "database", "ai"]
 Band = Literal["P0", "P1", "P2", "P3"]
 # Normalized lifecycle statuses (tracker import maps raw sheet values onto these)
-Status = Literal["to_apply", "applied", "interview", "offer", "rejected",
+Status = Literal["to_apply", "applied", "shortlisted", "interview", "offer", "rejected",
                  "not_accepting", "exp_mismatch", "closed",
                  "new", "gated_out", "scored", "tailored", "pending_approval", "approved"]
 

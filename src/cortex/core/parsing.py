@@ -82,6 +82,7 @@ def stack_category(text: str) -> str:
 _STATUS = {"to apply": "to_apply", "applied": "applied", "closed": "closed",
            "not accepting": "not_accepting", "not accepting applications": "not_accepting",
            "experience doesn't match": "exp_mismatch", "interview": "interview",
+           "shortlisted": "shortlisted", "shortlist": "shortlisted",
            "offer": "offer", "rejected": "rejected", "no response": "no_response", "ghosted": "no_response",
            # seen in the consolidated tracker (2026-11-08)
            "no longer accepting applications": "not_accepting",
@@ -94,7 +95,7 @@ _STATUS = {"to apply": "to_apply", "applied": "applied", "closed": "closed",
 # can't silently reset a job that is waiting for (or has passed) human approval.
 STATUS_RANK = {"to_apply": 0, "pending_approval": 1, "approved": 1, "closed": 1, "not_accepting": 1, "exp_mismatch": 1,
                "skills_mismatch": 1, "duplicate": 1,
-               "applied": 2, "interview": 3, "rejected": 3, "no_response": 3, "offer": 4}
+               "applied": 2, "shortlisted": 3, "interview": 4, "rejected": 4, "no_response": 4, "offer": 5}
 
 
 def normalize_status(raw: str) -> str:

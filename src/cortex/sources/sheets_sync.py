@@ -35,7 +35,7 @@ _ID = re.compile(r"^[A-Za-z0-9_-]{20,100}$")
 _TAB = re.compile(r"^[^'\[\]*?:/\\]{1,100}$")
 
 # CORTEX status -> the label written to the sheet (the importer maps each label straight back).
-SHEET_LABEL = {"applied": "Applied", "interview": "Interview", "offer": "Offer", "rejected": "Rejected",
+SHEET_LABEL = {"applied": "Applied", "shortlisted": "Shortlisted", "interview": "Interview", "offer": "Offer", "rejected": "Rejected",
                "no_response": "No response", "not_accepting": "Not accepting applications", "closed": "Closed"}
 
 

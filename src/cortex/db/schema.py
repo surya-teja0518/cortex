@@ -187,7 +187,7 @@ class InboxFindingRow(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[str] = mapped_column(String(64), index=True)
     message_id: Mapped[str] = mapped_column(String(64))
-    verdict: Mapped[str | None] = mapped_column(String(16))       # rejected | interview | None (not relevant)
+    verdict: Mapped[str | None] = mapped_column(String(16))       # rejected | shortlisted | interview | None
     job_ids: Mapped[str | None] = mapped_column(Text)              # JSON list
     auto: Mapped[bool] = mapped_column(default=False)
     applied: Mapped[bool] = mapped_column(default=False)

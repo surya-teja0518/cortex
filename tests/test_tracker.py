@@ -238,3 +238,43 @@ def test_imported_applied_without_date_falls_back_to_date_added(ses):
     assert [r["job_id"] for r in close_stale(ses, "u1", TODAY, 30)] == [j.id]
     k = add(ses, 2, "applied")                                          # no dates at all: still invisible
     assert k.id not in [r["job_id"] for r in followups(ses, "u1", TODAY, 7, max_days=None)]
+
+
+# ---------- shortlisted (2026-11-19): moved forward, no recruiter contact yet ----------
+
+def test_shortlisted_sits_between_applied_and_interview(ses):
+    j = add(ses, 1)
+    for s in ("applied", "shortlisted", "shortlisted", "interview", "offer"):
+        update_status(ses, "u1", j.id, s)
+    k = add(ses, 2, "interview")
+    with pytest.raises(TrackerError, match="can't go from"):
+        update_status(ses, "u1", k.id, "shortlisted")                       # never backwards
+    m = add(ses, 3, "applied")
+    update_status(ses, "u1", m.id, "shortlisted")
+    update_status(ses, "u1", m.id, "rejected")                               # rejected after a shortlist
+
+
+def test_shortlisted_is_active_but_not_a_response(ses):
+    j = add(ses, 1, "applied", applied_date=date(2026, 11, 1))
+    update_status(ses, "u1", j.id, "shortlisted", now=at(date(2026, 11, 5)))
+    assert [f["job_id"] for f in followups(ses, "u1", TODAY)] == [j.id]       # still waiting on them
+    r = report(ses, "u1", TODAY)
+    assert r.by_status == {"shortlisted": 1} and r.responses == 0             # no human contact yet
+    undo(ses, "u1", j.id)
+    assert j.status == "applied"
+
+
+def test_shortlisted_round_trips_through_sheet_and_eval():
+    from cortex.core.parsing import STATUS_RANK, normalize_status
+    from cortex.eval import POSITIVE_STATUSES
+    from cortex.sources.sheets_sync import SHEET_LABEL
+    assert normalize_status(SHEET_LABEL["shortlisted"]) == "shortlisted"
+    assert STATUS_RANK["applied"] < STATUS_RANK["shortlisted"] < STATUS_RANK["interview"] == STATUS_RANK["rejected"]
+    assert "shortlisted" in POSITIVE_STATUSES
+
+
+def test_undo_first_event_on_imported_applied_goes_back_to_applied(ses):
+    j = add(ses, 1, "applied", applied_date=date(2026, 11, 1))                # sheet import: no event
+    update_status(ses, "u1", j.id, "rejected", note="auto from Gmail")
+    undo(ses, "u1", j.id)
+    assert (j.status, j.applied_date) == ("applied", date(2026, 11, 1))      # not to_apply
