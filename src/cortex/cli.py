@@ -13,8 +13,41 @@ from cortex.db.schema import JobRow, get_session
 from cortex.sources.synapse_import import import_files
 
 
+def _db_url() -> str:
+    return get_secret("CORTEX_DB_URL", required=False) or "sqlite:///data/cortex.db"
+
+
 def _session():
-    return get_session(get_secret("CORTEX_DB_URL", required=False) or "sqlite:///data/cortex.db")
+    return get_session(_db_url())
+
+
+def _checkpointer():
+    from cortex.graph import checkpoint_target, open_checkpointer
+    return open_checkpointer(checkpoint_target(_db_url()))
+
+
+def cmd_migrate_db(a, uid):
+    """Copy the local SQLite data + audit file into the shared database (Neon). Dry run unless --yes."""
+    from cortex.db.migrate import MigrateError, copy_database
+    from cortex.db.schema import is_postgres
+    dst = a.to or get_secret("CORTEX_DB_URL", required=False)
+    if not dst or not is_postgres(dst):
+        raise SystemExit("set CORTEX_DB_URL in .env to your Neon (Postgres) URL first")   # never echo the URL
+    try:
+        r = copy_database(a.source, dst, audit_file=a.audit, dry_run=not a.yes)
+    except MigrateError as e:
+        raise SystemExit(f"not copied: {e}") from None
+    for t, n in r.counts.items():
+        print(f"  {t:22} {n:>6}" + (f"  -> {r.copied.get(t)}" if r.done else ""))
+    if r.pending_threads:
+        print(f"  waiting for approval (decide before switching, else re-tailor): jobs {r.pending_threads}")
+    if not r.done:
+        print("dry run: nothing copied. Re-run with --yes to copy.")
+    else:
+        print(f"audit records copied + verified: {r.audit_records}")
+        print("COPY OK: row counts match" if r.ok else "COUNT MISMATCH: do not switch, tell Claude")
+        if not r.ok:
+            raise SystemExit(1)
 
 
 def cmd_import(a, uid):
@@ -341,7 +374,7 @@ def cmd_tailor(a, uid):
     from cortex.agents.truth_guard import TruthGuard
     from cortex.core.ratelimit import NoLimit
     from cortex.core.resume import TailoredResume, load_master
-    from cortex.graph import Deps, build_graph, open_checkpointer, start_tailoring
+    from cortex.graph import Deps, build_graph, start_tailoring
     from cortex.llm.router import build_route
 
     cfg, master, audit, ses = load_config(a.config), load_master(a.master), AuditLog(), _session()
@@ -368,7 +401,7 @@ def cmd_tailor(a, uid):
         tailor = Tailor(router, master, NoLimit(), audit,   # the router rate-limits per provider
                         cover_note=tcfg.get("cover_note", False))
     app = build_graph(Deps(session_factory=lambda: ses, audit=audit, guard=TruthGuard(master), tailor=tailor),
-                      open_checkpointer())
+                      _checkpointer())
     st = start_tailoring(app, ses, uid, a.job_id)
     used = (st.get("resume") or {}).get("based_on") or (router.served_by if router else None) or "-"
     print(f"job {a.job_id}: {st['status']} (attempts={st.get('attempts', 0)}, based on {used})")
@@ -395,13 +428,13 @@ def packet_builder(master_path: str = "master_resume.yaml", contact_path: str = 
 
 def cmd_packet(a, uid):
     """Build (or retry) the packet for an approved job: resume.pdf + job.md under packets/."""
-    from cortex.graph import Deps, build_graph, build_packet, open_checkpointer
+    from cortex.graph import Deps, build_graph, build_packet
 
     builder, why = packet_builder(a.master, a.contact)
     if builder is None:
         raise SystemExit(f"cannot build packets: {why}")
     ses = _session()
-    app = build_graph(Deps(session_factory=lambda: ses, audit=AuditLog(), packet=builder), open_checkpointer())
+    app = build_graph(Deps(session_factory=lambda: ses, audit=AuditLog(), packet=builder), _checkpointer())
     st = build_packet(app, ses, uid, a.job_id)
     print(f"job {a.job_id}: packet at {st['packet_path']}  (CORTEX never submits: apply yourself)")
 
@@ -648,6 +681,12 @@ def main(argv=None):
     c.add_argument("--yes", action="store_true", help="actually change them (default: preview only)")
     c.set_defaults(fn=cmd_close_stale)
     sub.add_parser("llm-check", help="ping every configured LLM provider").set_defaults(fn=cmd_llm_check)
+    mg = sub.add_parser("migrate-db", help="one-time copy of the local SQLite data into Neon (dry run unless --yes)")
+    mg.add_argument("--from", dest="source", default="sqlite:///data/cortex.db")
+    mg.add_argument("--to", default=None, help="default: CORTEX_DB_URL from .env")
+    mg.add_argument("--audit", default="data/audit.log", help="audit file to copy into the chain")
+    mg.add_argument("--yes", action="store_true", help="actually copy")
+    mg.set_defaults(fn=cmd_migrate_db)
     b = sub.add_parser("bench", help="benchmark local models on the real tailor task")
     b.add_argument("--providers", default="ollama_8b,ollama_granite", help="comma-separated provider names")
     b.add_argument("--jobs", type=int, default=5)

@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import (
     Date,
     DateTime,
+    Float,
     Integer,
     String,
     Text,
@@ -193,6 +194,20 @@ class InboxFindingRow(Base):
     applied: Mapped[bool] = mapped_column(default=False)
     subject: Mapped[str | None] = mapped_column(String(120))
     found_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class AuditRow(Base):
+    """Hash-chained audit log in the shared database (Postgres: every device appends to one chain).
+    Same record + hash as the file log, so a file log copied in verifies unchanged. Append-only by code:
+    nothing in CORTEX updates or deletes these rows."""
+    __tablename__ = "audit_log"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ts: Mapped[float] = mapped_column(Float)
+    actor: Mapped[str] = mapped_column(String(64))
+    action: Mapped[str] = mapped_column(String(64))
+    details: Mapped[str] = mapped_column(Text)           # JSON
+    prev: Mapped[str] = mapped_column(String(64))
+    hash: Mapped[str] = mapped_column(String(64), unique=True)
 
 
 def db_url(url: str) -> str:

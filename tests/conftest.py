@@ -8,6 +8,7 @@ import pytest
 def _ignore_personal_config(monkeypatch):
     """Tests use the shared config.yaml only, never the developer's config.local.yaml."""
     monkeypatch.setenv("CORTEX_NO_LOCAL_CONFIG", "1")
+    monkeypatch.delenv("CORTEX_DB_URL", raising=False)   # .env may point at the real Neon database
 
 
 @pytest.fixture(autouse=True)
