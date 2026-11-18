@@ -91,3 +91,14 @@ def run_daily(session, cfg: dict, user_id: str, today: date, *, fetch: Callable 
         audit.log("daily", "run", user_id=user_id, day=today.isoformat(), failed=res.failed_steps,
                   digest=res.digest_status[:60])
     return res
+
+
+def public_notes(notes: list[str]) -> list[str]:
+    """Counts-only version of the step notes, for a log anyone can read (GitHub Actions on a public repo).
+    Gmail lines name companies and titles: they become counts (the details are in the private digest email)."""
+    marked = sum(1 for n in notes if n.startswith("gmail: marked "))
+    check = sum(1 for n in notes if n.startswith("gmail: check yourself"))
+    out = [n for n in notes if not n.startswith(("gmail: marked ", "gmail: check yourself"))]
+    if marked or check:
+        out.insert(0, f"gmail: {marked} recorded, {check} to check yourself (details in your digest email)")
+    return out

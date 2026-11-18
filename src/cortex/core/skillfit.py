@@ -36,12 +36,44 @@ def _track_text(t) -> str:
     return "\n".join(parts)
 
 
+class _Terms:
+    """Truth Guard's term detection without the rest of the master (cloud runs: skills file only)."""
+    def __init__(self, skills: list[dict]):
+        from cortex.agents.truth_guard import TECH_TERMS, _term_regex
+        self._skill_canon = {norm(n): norm(s["name"]) for s in skills for n in (s["name"], *s.get("aliases", []))}
+        vocab = {*TECH_TERMS, *(n for s in skills for n in (s["name"], *s.get("aliases", [])))}
+        self._vocab = {norm(t) for t in vocab}
+        self._vocab_rx = _term_regex(vocab)
+
+    def _terms_in(self, text: str) -> list[str]:
+        return TruthGuard._terms_in(self, text)
+
+
 class SkillMatcher:
     def __init__(self, master: MasterResume):
         self._g = TruthGuard(master)
         self.tracks = {name: self.terms(_track_text(t)) for name, t in (master.tracks or {}).items()}
         everything = [s.name for s in master.skills] + [b for r in master.roles for b in r.bullets]
         self.have = set().union(self.terms("\n".join(everything)), *self.tracks.values())
+        self._skills = [{"name": s.name, "aliases": list(s.aliases)} for s in master.skills]
+
+    def export(self) -> dict:
+        """What a cloud run needs to score fit exactly like this machine: skill names + aliases and the TERM SETS
+        (canonical tech names such as 'kafka') found in the resume. Never bullet text, employers, clients,
+        projects, metrics or contact details (test-enforced): the master resume itself stays local."""
+        return {"version": 1, "skills": self._skills, "have": sorted(self.have),
+                "tracks": {k: sorted(v) for k, v in self.tracks.items()}}
+
+    @classmethod
+    def from_export(cls, d: dict) -> "SkillMatcher":
+        if d.get("version") != 1:
+            raise ValueError("unknown skills file version: re-run `cortex export-skills`")
+        m = cls.__new__(cls)
+        m._g = _Terms(d["skills"])
+        m._skills = d["skills"]
+        m.have = set(d["have"])
+        m.tracks = {k: set(v) for k, v in d["tracks"].items()}
+        return m
 
     def terms(self, text: str) -> set[str]:
         return {self._g._skill_canon.get(norm(t), norm(t)) for t in self._g._terms_in(text or "")}

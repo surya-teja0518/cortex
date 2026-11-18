@@ -231,7 +231,8 @@ def get_engine(url: str = "sqlite:///data/cortex.db"):
     and recycles after 5 minutes."""
     url = db_url(url)
     if url not in _ENGINES:
-        kw = {"pool_pre_ping": True, "pool_recycle": 300} if is_postgres(url) else {}
+        # hide_parameters: a Postgres error message never carries row values (job text, notes) into a log
+        kw = {"pool_pre_ping": True, "pool_recycle": 300, "hide_parameters": True} if is_postgres(url) else {}
         engine = create_engine(url, **kw)
         Base.metadata.create_all(engine)
         _ENGINES[url] = engine
