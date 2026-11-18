@@ -233,10 +233,21 @@ def _profile(cfg: dict, master_path: str = "master_resume.yaml", use: bool | Non
     from cortex.core.resume import load_master
     if not (cfg["llm"].get("scorer_profile", False) if use is None else use):
         return None
-    if not Path(master_path).exists():
-        print(f"note: {master_path} not found; scoring with the generic profile", file=sys.stderr)
-        return None
-    return candidate_profile(load_master(master_path))
+    if Path(master_path).exists():
+        return candidate_profile(load_master(master_path))
+    skills = _skills_file()
+    if skills is not None:                # cloud run: the exported skills-only profile
+        return skills["profile"]
+    print(f"note: {master_path} not found; scoring with the generic profile", file=sys.stderr)
+    return None
+
+
+def _skills_file() -> dict | None:
+    """skills_profile.json from `cortex export-skills` (the cloud job's stand-in for the master resume)."""
+    import json
+    from pathlib import Path
+    p = Path(os.getenv("CORTEX_SKILLS_FILE", "skills_profile.json"))
+    return json.loads(p.read_text()) if p.exists() else None
 
 
 def _build_scorer(cfg: dict, audit, provider: str = "route", profile: str | None = None):
@@ -255,9 +266,28 @@ def _compute_fits(ses, uid, master_path: str = "master_resume.yaml") -> int:
     from cortex.agents.batch_score import compute_fits
     from cortex.core.resume import load_master
     from cortex.core.skillfit import SkillMatcher
-    if not Path(master_path).exists():
-        return 0
-    return compute_fits(ses, uid, SkillMatcher(load_master(master_path)))
+    if Path(master_path).exists():
+        return compute_fits(ses, uid, SkillMatcher(load_master(master_path)))
+    skills = _skills_file()
+    return compute_fits(ses, uid, SkillMatcher.from_export(skills["matcher"])) if skills else 0
+
+
+def cmd_export_skills(a, uid):
+    """Write skills_profile.json: skill terms + the skills-only scorer profile, for the cloud daily job.
+    The master resume itself never leaves this machine."""
+    import json
+    from pathlib import Path
+
+    from cortex.agents.scorer import candidate_profile
+    from cortex.core.resume import load_master
+    from cortex.core.skillfit import SkillMatcher
+    master = load_master(a.master)
+    out = {"profile": candidate_profile(master), "matcher": SkillMatcher(master).export()}
+    p = Path(a.out)
+    p.write_text(json.dumps(out, indent=1))
+    p.chmod(0o600)
+    print(f"wrote {p}: {len(out['matcher']['have'])} skill terms + the skills-only profile "
+          "(no bullets, employers, metrics or contact). Paste its contents into the GitHub secret CORTEX_SKILLS_JSON.")
 
 
 def cmd_score(a, uid):
@@ -287,7 +317,10 @@ def _digest_fn(cfg, uid, audit, dry_run):
                                address=get_secret("GMAIL_ADDRESS", required=False),
                                password=get_secret("GMAIL_APP_PASSWORD", required=False))
         if dry_run:
-            print(f"Subject: {subject(d)}\n\n{render(d)}")
+            if _public_log():
+                print(f"digest (dry run): {d.new_total} new jobs; content not printed (public log)")
+            else:
+                print(f"Subject: {subject(d)}\n\n{render(d)}")
         return status
     return digest
 
@@ -342,7 +375,8 @@ def cmd_daily(a, uid):
     res = run_daily(ses, cfg, uid, datetime.now().date(), fetch=fetch, score=score, pull=pull, sync=sync_step,  # noqa: DTZ005
                     inbox=inbox_step,
                     digest=_digest_fn(cfg, uid, audit, a.dry_run), audit=audit)
-    for n in res.notes:
+    from cortex.daily import public_notes
+    for n in (public_notes(res.notes) if _public_log() else res.notes):
         print(f"  {n}")
     print(f"  digest: {res.digest_status}")
     if res.failed_steps:
@@ -585,7 +619,28 @@ def cmd_bench(a, uid):
     print(format_bench(runs))
 
 
+def _public_log() -> bool:
+    """CORTEX_PUBLIC_LOG=1 (the GitHub Actions workflow; the repo is PUBLIC, so anyone can read its logs):
+    print counts only. No companies, titles, email subjects, URLs or tracebacks."""
+    return os.getenv("CORTEX_PUBLIC_LOG") == "1"
+
+
 def main(argv=None):
+    if _public_log():
+        try:
+            return _main(argv)
+        except SystemExit as e:
+            if isinstance(e.code, str):     # messages are written for a private terminal: keep only the gist
+                print(e.code.split(":", 1)[0][:80], file=sys.stderr)
+                raise SystemExit(1) from None
+            raise
+        except Exception as e:  # noqa: BLE001 — a traceback could carry job data or SQL parameters
+            print(f"cortex failed: {type(e).__name__}", file=sys.stderr)
+            raise SystemExit(1) from None
+    return _main(argv)
+
+
+def _main(argv=None):
     p = argparse.ArgumentParser(prog="cortex")
     p.add_argument("--config", default=None)
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -681,6 +736,10 @@ def main(argv=None):
     c.add_argument("--yes", action="store_true", help="actually change them (default: preview only)")
     c.set_defaults(fn=cmd_close_stale)
     sub.add_parser("llm-check", help="ping every configured LLM provider").set_defaults(fn=cmd_llm_check)
+    ex = sub.add_parser("export-skills", help="write skills_profile.json (skills only) for the cloud daily job")
+    ex.add_argument("--master", default="master_resume.yaml")
+    ex.add_argument("--out", default="skills_profile.json")
+    ex.set_defaults(fn=cmd_export_skills)
     mg = sub.add_parser("migrate-db", help="one-time copy of the local SQLite data into Neon (dry run unless --yes)")
     mg.add_argument("--from", dest="source", default="sqlite:///data/cortex.db")
     mg.add_argument("--to", default=None, help="default: CORTEX_DB_URL from .env")

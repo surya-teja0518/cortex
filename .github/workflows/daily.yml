@@ -1,0 +1,61 @@
+# CORTEX daily run in the cloud (Phase 2, 2026-11-19): Gmail -> sheet sync -> Apify pull -> ATS fetch ->
+# LLM scoring -> digest email, every morning, whichever of Surya's devices is on.
+#
+# The repo is PUBLIC, so anyone can read these logs:
+# - CORTEX_PUBLIC_LOG=1: cortex prints counts only (no companies, titles, email subjects, URLs, tracebacks).
+# - No artifacts, no caches of data. Secrets are written to files only for this run (ephemeral runner, mode 600).
+# - Triggers: schedule + manual only. Forks / pull requests never run this and never see the secrets.
+name: cortex-daily
+
+on:
+  schedule:
+    - cron: "37 3 * * *"        # 09:07 IST (GitHub may start scheduled runs some minutes late)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cortex-daily
+  cancel-in-progress: false
+
+jobs:
+  daily:
+    if: github.repository == 'surya-teja0518/cortex'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CORTEX_PUBLIC_LOG: "1"
+      CORTEX_DB_URL: ${{ secrets.CORTEX_DB_URL }}
+      CORTEX_USER_ID: ${{ secrets.CORTEX_USER_ID }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+      GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -q -e ".[postgres,sheets,gmail]"
+      - name: Write secret files (this run only)
+        env:
+          CONFIG_LOCAL: ${{ secrets.CORTEX_CONFIG_LOCAL_YAML }}
+          SKILLS: ${{ secrets.CORTEX_SKILLS_JSON }}
+          SHEETS_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GMAIL_TOKEN: ${{ secrets.GMAIL_TOKEN_JSON }}
+        run: |
+          umask 077
+          printf '%s' "$CONFIG_LOCAL" > config.local.yaml
+          printf '%s' "$SKILLS"       > skills_profile.json
+          printf '%s' "$SHEETS_KEY"   > google-service-account.json
+          printf '%s' "$GMAIL_TOKEN"  > gmail-token.json
+      - name: cortex daily
+        run: cortex daily
+      - name: Remove secret files
+        if: always()
+        run: rm -f config.local.yaml skills_profile.json google-service-account.json gmail-token.json
