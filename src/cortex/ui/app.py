@@ -22,7 +22,8 @@ if pw:
         st.stop()
 
 uid = os.getenv("CORTEX_USER_ID", "surya")
-session = get_session(get_secret("CORTEX_DB_URL", required=False) or "sqlite:///data/cortex.db")
+DB_URL = get_secret("CORTEX_DB_URL", required=False) or "sqlite:///data/cortex.db"
+session = get_session(DB_URL)
 
 st.title("CORTEX: review queue")
 with st.sidebar:
@@ -61,7 +62,8 @@ st.caption("Each resume below already passed Truth Guard. Approving records your
 
 @st.cache_resource
 def _checkpointer():
-    return open_checkpointer()
+    from cortex.graph import checkpoint_target
+    return open_checkpointer(checkpoint_target(DB_URL))
 
 
 from cortex.cli import packet_builder

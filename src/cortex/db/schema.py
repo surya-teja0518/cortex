@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime
 from sqlalchemy import (
     Date,
     DateTime,
+    Float,
     Integer,
     String,
     Text,
@@ -195,7 +196,47 @@ class InboxFindingRow(Base):
     found_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
+class AuditRow(Base):
+    """Hash-chained audit log in the shared database (Postgres: every device appends to one chain).
+    Same record + hash as the file log, so a file log copied in verifies unchanged. Append-only by code:
+    nothing in CORTEX updates or deletes these rows."""
+    __tablename__ = "audit_log"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ts: Mapped[float] = mapped_column(Float)
+    actor: Mapped[str] = mapped_column(String(64))
+    action: Mapped[str] = mapped_column(String(64))
+    details: Mapped[str] = mapped_column(Text)           # JSON
+    prev: Mapped[str] = mapped_column(String(64))
+    hash: Mapped[str] = mapped_column(String(64), unique=True)
+
+
+def db_url(url: str) -> str:
+    """Normalize a database URL. Neon/Heroku-style postgres:// and plain postgresql:// use the psycopg 3
+    driver (the `[postgres]` extra); sqlite URLs pass through unchanged."""
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            return "postgresql+psycopg://" + url[len(prefix):]
+    return url
+
+
+def is_postgres(url: str) -> bool:
+    return db_url(url).startswith("postgresql")
+
+
+_ENGINES: dict[str, object] = {}
+
+
+def get_engine(url: str = "sqlite:///data/cortex.db"):
+    """One engine per URL per process. Postgres (Neon) closes idle connections, so the pool pings before use
+    and recycles after 5 minutes."""
+    url = db_url(url)
+    if url not in _ENGINES:
+        kw = {"pool_pre_ping": True, "pool_recycle": 300} if is_postgres(url) else {}
+        engine = create_engine(url, **kw)
+        Base.metadata.create_all(engine)
+        _ENGINES[url] = engine
+    return _ENGINES[url]
+
+
 def get_session(url: str = "sqlite:///data/cortex.db"):
-    engine = create_engine(url)
-    Base.metadata.create_all(engine)
-    return sessionmaker(engine)()
+    return sessionmaker(get_engine(url))()

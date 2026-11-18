@@ -3,7 +3,8 @@
     START -> tailor_and_guard --passed--> approval (interrupt) -> record --approved--> packet -> END
                               \\-manual_review / guard_rejected-> END   \\-rejected-> END
 
-One graph run = one LangGraph *thread* (thread_id), checkpointed to SQLite after every node.
+One graph run = one LangGraph *thread* (thread_id), checkpointed after every node (SQLite file, or the
+shared Postgres database when CORTEX_DB_URL is Postgres).
 - `interrupt()` in `approval` pauses the run and persists it; nothing downstream runs until a
   human resumes it with `Command(resume=decision)`. Only the Streamlit dashboard calls `submit_decision`.
 - After a crash or restart, a new process compiling the same graph against the same checkpoint DB
@@ -67,9 +68,59 @@ class Deps:
     packet: PacketBuilder | None = None   # None -> approved threads wait at `packet` until configured
 
 
-def open_checkpointer(path: str = "data/checkpoints.db") -> SqliteSaver:
+def open_checkpointer(target: str = "data/checkpoints.db"):
+    """Checkpoint store for the graph threads: a SQLite file path (single machine), or a Postgres URL
+    (Neon: shared by every device, so an approval made from the phone resumes the same thread)."""
+    from cortex.db.schema import is_postgres
+    return _postgres_saver(target) if is_postgres(target) else _sqlite_saver(target)
+
+
+def checkpoint_target(db_url: str | None, path: str = "data/checkpoints.db") -> str:
+    """Checkpoints live next to the data: in the same Postgres database, else the local SQLite file."""
+    from cortex.db.schema import is_postgres
+    return db_url if db_url and is_postgres(db_url) else path
+
+
+def _sqlite_saver(path: str) -> SqliteSaver:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     return SqliteSaver(sqlite3.connect(path, check_same_thread=False))
+
+
+def _postgres_saver(url: str, search_path: str | None = None):
+    """PostgresSaver on a small pool. LangGraph needs autocommit + dict rows; prepare_threshold=0 because
+    Neon's pooled endpoint (PgBouncer) can't keep prepared statements; `check` replaces connections Neon
+    closed while idle."""
+    try:
+        from langgraph.checkpoint.postgres import PostgresSaver
+        from psycopg.rows import dict_row
+        from psycopg_pool import ConnectionPool
+    except ImportError as e:
+        raise RuntimeError('Postgres support missing: pip install -e ".[postgres]"') from e
+    kwargs = {"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row}
+    if search_path:
+        kwargs["options"] = f"-csearch_path={search_path}"
+    conninfo = url.replace("postgresql+psycopg://", "postgresql://", 1).replace("postgres://", "postgresql://", 1)
+    pool = ConnectionPool(conninfo, min_size=0, max_size=4, kwargs=kwargs, check=ConnectionPool.check_connection,
+                          open=True)
+    saver = PostgresSaver(pool)
+    _setup_checkpoints(saver)
+    return saver
+
+
+def _setup_checkpoints(saver) -> None:
+    """PostgresSaver.setup() without CONCURRENTLY. LangGraph builds its indexes with CREATE INDEX
+    CONCURRENTLY, which waits for EVERY open transaction in the database to end; CORTEX's own session is
+    usually mid-transaction when the checkpointer opens (cortex tailor: read the job, then open it), so the
+    first setup hung forever (found 2026-11-19 on Postgres). The checkpoint tables are tiny: a plain index
+    build is instant and only locks that table. Same migrations, same version numbers, so later LangGraph
+    upgrades continue from here."""
+    with saver._cursor() as cur:
+        cur.execute(saver.MIGRATIONS[0])
+        row = cur.execute("SELECT v FROM checkpoint_migrations ORDER BY v DESC LIMIT 1").fetchone()
+        version = -1 if row is None else row["v"]
+        for v in range(version + 1, len(saver.MIGRATIONS)):
+            cur.execute(saver.MIGRATIONS[v].replace("CREATE INDEX CONCURRENTLY", "CREATE INDEX"))
+            cur.execute("INSERT INTO checkpoint_migrations (v) VALUES (%s)", (v,))
 
 
 def _row(ses, thread_id: str) -> TailoredResumeRow | None:
