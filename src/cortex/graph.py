@@ -103,8 +103,24 @@ def _postgres_saver(url: str, search_path: str | None = None):
     pool = ConnectionPool(conninfo, min_size=0, max_size=4, kwargs=kwargs, check=ConnectionPool.check_connection,
                           open=True)
     saver = PostgresSaver(pool)
-    saver.setup()
+    _setup_checkpoints(saver)
     return saver
+
+
+def _setup_checkpoints(saver) -> None:
+    """PostgresSaver.setup() without CONCURRENTLY. LangGraph builds its indexes with CREATE INDEX
+    CONCURRENTLY, which waits for EVERY open transaction in the database to end; CORTEX's own session is
+    usually mid-transaction when the checkpointer opens (cortex tailor: read the job, then open it), so the
+    first setup hung forever (found 2026-11-19 on Postgres). The checkpoint tables are tiny: a plain index
+    build is instant and only locks that table. Same migrations, same version numbers, so later LangGraph
+    upgrades continue from here."""
+    with saver._cursor() as cur:
+        cur.execute(saver.MIGRATIONS[0])
+        row = cur.execute("SELECT v FROM checkpoint_migrations ORDER BY v DESC LIMIT 1").fetchone()
+        version = -1 if row is None else row["v"]
+        for v in range(version + 1, len(saver.MIGRATIONS)):
+            cur.execute(saver.MIGRATIONS[v].replace("CREATE INDEX CONCURRENTLY", "CREATE INDEX"))
+            cur.execute("INSERT INTO checkpoint_migrations (v) VALUES (%s)", (v,))
 
 
 def _row(ses, thread_id: str) -> TailoredResumeRow | None:
