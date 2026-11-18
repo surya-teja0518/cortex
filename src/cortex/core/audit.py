@@ -85,6 +85,27 @@ class _DbStore:
                 ts=rec["ts"], actor=rec["actor"], action=rec["action"],
                 details=json.dumps(rec["details"]), prev=rec["prev"], hash=rec["hash"]))
 
+    def append_many(self, recs: list[dict], batch: int = 500) -> int:
+        """Existing records (a file log being copied in), all in ONE transaction: the whole chain is checked
+        to continue from the current last hash before anything is written. One round trip per batch instead
+        of three per record (4,491 records to Neon took ~45 s per 100 one by one, 2026-11-19)."""
+        from sqlalchemy import select
+
+        from cortex.db.schema import AuditRow
+        with self.engine.begin() as c:
+            if self.engine.dialect.name == "postgresql":
+                c.exec_driver_sql(f"SELECT pg_advisory_xact_lock({_LOCK_KEY})")
+            prev = c.execute(select(AuditRow.hash).order_by(AuditRow.id.desc()).limit(1)).scalar() or "GENESIS"
+            for rec in recs:
+                if rec["prev"] != prev or _hash({k: v for k, v in rec.items() if k != "hash"}) != rec["hash"]:
+                    raise ValueError("record does not continue the chain")
+                prev = rec["hash"]
+            rows = [{"ts": r["ts"], "actor": r["actor"], "action": r["action"], "details": json.dumps(r["details"]),
+                     "prev": r["prev"], "hash": r["hash"]} for r in recs]
+            for i in range(0, len(rows), batch):
+                c.execute(AuditRow.__table__.insert(), rows[i:i + batch])
+        return len(recs)
+
     def records(self) -> list[dict]:
         from sqlalchemy import select
 

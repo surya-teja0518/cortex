@@ -74,9 +74,7 @@ def copy_database(src_url: str, dst_url: str, *, audit_file: str | None = None, 
         if not f.verify():
             raise MigrateError(f"{audit_file} fails verify(): not copying a broken chain")
         store = _DbStore(dst_url)
-        for rec in f.records():
-            store.append("", "", {}, rec=rec)
-            rep.audit_records += 1
+        rep.audit_records = store.append_many(f.records())
         db = AuditLog.__new__(AuditLog)
         db._db = store
         if not db.verify():
