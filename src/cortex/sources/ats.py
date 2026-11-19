@@ -281,15 +281,38 @@ _UPDATABLE = ("title", "url", "location", "work_model", "comp", "posted", "exp_r
               "score", "band", "score_reasons", "gate_reason", "sanitizer_flags", "description")
 
 
-def upsert(session, vals: dict, *, own_prefix: str, dry_run: bool) -> str:
+class JobIndex:
+    """The user's existing jobs keyed by (source, external_id), loaded with ONE query. Looking each posting up
+    with its own SELECT also autoflushed the previous insert: ~2 round trips per posting, which from India to
+    Neon (Ohio) ran a ~1,000-posting pull for 15 minutes until the server dropped the connection (2026-11-19)."""
+    def __init__(self, session, user_id: str):
+        self._rows = {(r.source, r.external_id): r for r in session.scalars(
+            select(JobRow).where(JobRow.user_id == user_id))}
+
+    def get(self, source: str, external_id: str) -> JobRow | None:
+        return self._rows.get((source, external_id))
+
+    def add(self, row: JobRow) -> None:
+        self._rows[(row.source, row.external_id)] = row
+
+
+def upsert(session, vals: dict, *, own_prefix: str, dry_run: bool, index: JobIndex | None = None) -> str:
     """Insert, or update a row this source created ('updated'). A row another importer created (e.g. the same
     LinkedIn job from the SYNAPSE sheet) only gets a missing description ('enriched'): its track / YOE / score
-    are SYNAPSE's judgement and the eval baseline. Never status / applied_date / notes: those are Surya's."""
-    existing = session.scalar(select(JobRow).where(JobRow.user_id == vals["user_id"], JobRow.source == vals["source"],
-                                                   JobRow.external_id == vals["external_id"]))
+    are SYNAPSE's judgement and the eval baseline. Never status / applied_date / notes: those are Surya's.
+    index: a JobIndex for bulk runs (no per-posting query; inserts are written in one flush at the end)."""
+    if index is not None:
+        existing = index.get(vals["source"], vals["external_id"])
+    else:
+        existing = session.scalar(select(JobRow).where(
+            JobRow.user_id == vals["user_id"], JobRow.source == vals["source"],
+            JobRow.external_id == vals["external_id"]))
     if existing is None:
         if not dry_run:
-            session.add(JobRow(**vals))
+            row = JobRow(**vals)
+            session.add(row)
+            if index is not None:
+                index.add(row)
         return "inserted"
     if (existing.batch or "").startswith(own_prefix):
         if not dry_run:
@@ -333,6 +356,7 @@ def fetch_all(session, cfg: dict, user_id: str, *, client: httpx.Client | None =
     own = client is None
     client = client or httpx.Client()
     results = []
+    index = JobIndex(session, user_id)
     try:
         for b in boards:
             ats, board = str(b.get("ats", "")).lower(), str(b.get("board", "")).lower()
@@ -359,7 +383,8 @@ def fetch_all(session, cfg: dict, user_id: str, *, client: httpx.Client | None =
                                       f"ats-{today.isoformat()}")
                 res.gated += vals["gate_reason"] is not None
                 res.flagged += vals["sanitizer_flags"] is not None
-                what = upsert(session, vals, own_prefix="ats-", dry_run=dry_run)
+                with session.no_autoflush:
+                    what = upsert(session, vals, own_prefix="ats-", dry_run=dry_run, index=index)
                 if what == "inserted":
                     res.inserted += 1
                     res.new_jobs.append((vals["title"], vals["location"], vals["band"]))

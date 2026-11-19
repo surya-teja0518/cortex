@@ -49,6 +49,12 @@ def _s(v) -> str:
     return v.strip() if isinstance(v, str) else ""
 
 
+def _t(v) -> str:
+    """Display text (title, company): HTML entities decoded ('Agentic AI &amp; LLM' -> '&', seen 2026-11-19)."""
+    import html
+    return html.unescape(_s(v)).strip()
+
+
 def _int(v) -> int | None:
     return v if isinstance(v, int) and not isinstance(v, bool) else None
 
@@ -81,12 +87,14 @@ def parse_linkedin(item) -> tuple[Posting, str] | None:
     if not isinstance(item, dict) or not _s(item.get("id")).isdigit() or not _s(item.get("title")):
         return None
     desc = _s(item.get("description")) or html_to_text(_s(item.get("descriptionHtml")))
-    return (Posting(_s(item["id"]), _s(item["title"]), _s(item.get("location")), _s(item.get("url")), desc,
+    return (Posting(_s(item["id"]), _t(item["title"]), _t(item.get("location")), _s(item.get("url")), desc,
                     _date(item.get("postedDate")), applicants=parse_applicants(item.get("applicationsCount")),
-                    comp=_s(item.get("salary")) or None), _s(item.get("companyName")))
+                    comp=_s(item.get("salary")) or None), _t(item.get("companyName")))
 
 
-_NK_COMPANY = re.compile(r"^https://www\.naukri\.com/([a-z0-9-]{1,100}?)-jobs-careers-\d+$")
+# full URL (rows seen 2026-11-08) or the bare slug 'infosys-jobs-careers-11244' (rows seen 2026-11-19: 147 of 150
+# Naukri postings were dropped as "no company" because only the URL form matched). Other hosts never match.
+_NK_COMPANY = re.compile(r"^(?:https://www\.naukri\.com/)?([a-z0-9-]{1,100}?)-jobs-careers-\d+$")
 
 
 def company_from_slug(url) -> str:
@@ -102,7 +110,7 @@ def parse_naukri(item) -> tuple[Posting, str] | None:
         return None
     cd = item.get("companyDetail") if isinstance(item.get("companyDetail"), dict) else {}
     bi = item.get("basicInfo") if isinstance(item.get("basicInfo"), dict) else {}
-    company = _s(cd.get("name")) or _s(bi.get("companyName")) or company_from_slug(item.get("staticCompanyName"))
+    company = _t(cd.get("name")) or _t(bi.get("companyName")) or company_from_slug(item.get("staticCompanyName"))
     locs = [_s(x.get("label")) for x in item.get("locations") or [] if isinstance(x, dict)]
     lo, hi = _int(item.get("minimumExperience")), _int(item.get("maximumExperience"))
     exp = f"{lo}-{hi} yrs" if lo is not None and hi is not None else (f"{lo}+ yrs" if lo is not None else None)
@@ -110,7 +118,7 @@ def parse_naukri(item) -> tuple[Posting, str] | None:
     comp = None if sal.get("hideSalary") is True else (_s(sal.get("label")) or None)
     desc = "\n".join(x for x in (_s(item.get("shortDescription")), html_to_text(_s(item.get("description")))) if x)
     url = _s(item.get("url")) or _s(item.get("staticUrl"))
-    return (Posting(_s(item["jobId"]), _s(item["title"]), "; ".join(x for x in locs if x), url, desc,
+    return (Posting(_s(item["jobId"]), _t(item["title"]), "; ".join(x for x in locs if x), url, desc,
                     _date(item.get("createdDate")), _s(item.get("wfhLabel")) or None, exp,
                     _int(item.get("applyCount")), comp), company)
 
@@ -207,6 +215,8 @@ def pull_all(session, cfg: dict, user_id: str, *, client: ApifyClient | None = N
             raise ApifyError("APIFY_TOKEN missing in .env")
         client = ApifyClient(token, limiter=RateLimiter(cfg.get("rate_limits", {}).get("apify", 10)))
     results = []
+    from cortex.sources.ats import JobIndex
+    index = JobIndex(session, user_id)
     for a in actors:
         actor, source = str(a.get("actor", "")), str(a.get("source", "")).lower()
         res = ActorResult(actor, source)
@@ -233,7 +243,8 @@ def pull_all(session, cfg: dict, user_id: str, *, client: ApifyClient | None = N
                                           f"apify-{today.isoformat()}")
                     res.gated += vals["gate_reason"] is not None
                     res.flagged += vals["sanitizer_flags"] is not None
-                    what = upsert(session, vals, own_prefix="apify-", dry_run=dry_run)
+                    with session.no_autoflush:
+                        what = upsert(session, vals, own_prefix="apify-", dry_run=dry_run, index=index)
                     if what == "inserted":
                         res.inserted += 1
                         res.new_jobs.append((vals["company"], vals["title"], vals["location"], vals["band"]))
