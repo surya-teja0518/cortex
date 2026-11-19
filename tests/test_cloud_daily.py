@@ -110,3 +110,13 @@ def test_workflow_is_locked_down():
     text = (Path(__file__).parent.parent / ".github/workflows/daily.yml").read_text()
     assert "upload-artifact" not in text and "actions/cache" not in text and "pull_request" not in text
     assert "set -x" not in text and "cat " not in text                            # never echo the secret files
+
+
+def test_vercel_serves_no_repo_files_statically():
+    """2026-11-20: with the 'Other' preset Vercel published the whole repo (AGENTS.md, config.yaml, src/...) as
+    static files in front of the app. Only public/ may be static, and it holds nothing but robots.txt."""
+    root = Path(__file__).parent.parent
+    cfg = json.loads((root / "vercel.json").read_text())
+    assert cfg["outputDirectory"] == "public" and cfg["regions"] == ["cle1"]
+    assert sorted(p.name for p in (root / "public").iterdir()) == ["robots.txt"]
+    assert "Disallow: /" in (root / "public/robots.txt").read_text()
