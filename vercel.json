@@ -1,6 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "regions": ["cle1"],
+  "regions": [
+    "cle1"
+  ],
+  "outputDirectory": "public",
   "functions": {
     "api/index.py": {
       "includeFiles": "{src/**,config.yaml}",
@@ -8,5 +11,10 @@
       "maxDuration": 30
     }
   },
-  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/api/index"
+    }
+  ]
 }
