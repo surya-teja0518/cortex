@@ -118,6 +118,13 @@ def test_naukri_company_from_slug_when_company_detail_null():
     assert (company, p.exp_raw, p.applicants) == ("Pwc", "4-8 yrs", 200)
     assert company_from_slug("https://www.naukri.com/lpl-financials-jobs-careers-5507842") == "Lpl Financials"
     assert company_from_slug("https://evil.example/pwc-jobs-careers-1") == "" and company_from_slug(None) == ""
+    assert company_from_slug("infosys-jobs-careers-11244") == "Infosys"                # bare slug (2026-11-19 rows)
+    assert company_from_slug("evil.example/pwc-jobs-careers-1") == ""
+
+
+def test_titles_and_companies_decode_html_entities():
+    p, company = parse_linkedin({**LI_GOOD, "title": "AI Engineer - Agentic AI &amp; LLM", "companyName": "A&amp;B"})
+    assert (p.title, company) == ("AI Engineer - Agentic AI & LLM", "A&B")
 
 
 def test_parse_real_naukri_row():
@@ -237,3 +244,29 @@ def test_daily_pull_failure_is_reported(ses):
     res = run_daily(ses, {}, "u1", TODAY, pull=boom, fetch=None, score=None,
                     digest=lambda s, n: seen.setdefault("n", list(n)) and "sent")
     assert res.failed_steps == ["pull"] and seen["n"] == ["apify FAILED: ApifyError (HTTP 401: APIFY_TOKEN rejected)"]
+
+
+def test_pull_reads_jobs_with_one_query_not_one_per_posting(ses, cfg):
+    """2026-11-19: one SELECT per posting (+ an autoflushed INSERT each) ran a real pull to Neon for 15 min until
+    the server dropped the connection. Queries on `jobs` must not grow with the number of postings."""
+    import copy
+
+    from sqlalchemy import event
+    many = []
+    for i in range(60):
+        row = copy.deepcopy(LI_GOOD)
+        row["id"] = str(4460000000 + i)
+        row["link"] = f"https://www.linkedin.com/jobs/view/{4460000000 + i}"
+        many.append(row)
+    client = api({"/acts/valig~linkedin-jobs-scraper/runs": RUNS, "/datasets/0Bn6SlCEcSSE1dQJ1/items": many,
+                  "/acts/memo23~naukri-scraper/runs": NK_RUNS, "/datasets/oTuJhqeBdxpQhZxUj/items": []})
+    selects = []
+    engine = ses.get_bind()
+    listen = lambda conn, cur, stmt, *a: selects.append(stmt) if stmt.lstrip().upper().startswith("SELECT") and "FROM jobs" in stmt else None
+    event.listen(engine, "before_cursor_execute", listen)
+    try:
+        res = {r.source: r for r in run(ses, cfg, client)}
+    finally:
+        event.remove(engine, "before_cursor_execute", listen)
+    assert res["linkedin"].inserted == 60
+    assert len(selects) <= 3, len(selects)          # the index load + refresh_dups, not 60+
