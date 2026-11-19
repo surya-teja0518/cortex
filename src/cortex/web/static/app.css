@@ -82,3 +82,11 @@ button:focus-visible, .button:focus-visible, select:focus-visible, input:focus-v
 .stat { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px; }
 .stat .n { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 body.login main { padding: 16px; }
+
+/* phones: brand + sign out on the first row, the four tabs on their own full-width row */
+@media (max-width: 600px) {
+  .top { row-gap: 6px; }
+  .top .brand { flex: 1; }
+  .top nav { order: 3; flex-basis: 100%; justify-content: space-between; }
+  .top nav a { padding: 6px 8px; font-size: 0.95rem; }
+}
