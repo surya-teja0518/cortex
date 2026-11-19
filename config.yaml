@@ -38,7 +38,7 @@ sources:
   # Needs APIFY_TOKEN in .env. Jobs already imported from the sheet merge (same source + job id).
   apify:
     since_days: 8        # runs started in the last N days (SYNAPSE runs Tue + Fri)
-    max_runs: 10         # per actor
+    max_runs: 20         # per actor: 2 batches of 9 LinkedIn runs fit in the 8-day window (was 10: one missed day could hide a batch)
     max_items: 1000      # per dataset
     actors:
       - {actor: valig~linkedin-jobs-scraper, source: linkedin}

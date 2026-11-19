@@ -9,7 +9,8 @@ name: cortex-daily
 
 on:
   schedule:
-    - cron: "37 3 * * *"        # 09:07 IST (GitHub may start scheduled runs some minutes late)
+    - cron: "30 5 * * *"        # 11:00 IST: after the Tue/Fri Apify scrapes (10:00 + 10:20 IST) finish, so new jobs
+                                # arrive the same day. GitHub may start scheduled runs some minutes late.
   workflow_dispatch: {}
 
 permissions:
