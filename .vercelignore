@@ -1,0 +1,17 @@
+.env
+.env.*
+*.db
+data/
+packets/
+resumes/
+tests/
+.venv/
+.agents/
+.claude/
+master_resume.yaml
+contact.yaml
+answers.yaml
+config.local.yaml
+skills_profile.json
+gmail-*.json
+*service-account*.json

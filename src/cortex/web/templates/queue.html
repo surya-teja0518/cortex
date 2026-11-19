@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="bar">
+  <h1>Queue <span class="muted">{{ rows|length }} of {{ total }}</span></h1>
+  <form method="get" class="filters">
+    <select name="track" aria-label="Track">
+      <option value="" {% if not track %}selected{% endif %}>All tracks</option>
+      <option value="data" {% if track == 'data' %}selected{% endif %}>Data</option>
+      <option value="database" {% if track == 'database' %}selected{% endif %}>Database</option>
+      <option value="ai" {% if track == 'ai' %}selected{% endif %}>AI</option>
+    </select>
+    <button type="submit" class="quiet">Filter</button>
+  </form>
+</section>
+{% if not rows %}<p class="empty">Nothing in the queue. New jobs arrive with the next daily run.</p>{% endif %}
+<ul class="cards">
+{% for r in rows %}
+  <li class="card job" id="job-{{ r.id }}">
+    <div class="head">
+      <div>
+        <div class="company">{{ r.company }}</div>
+        <div class="role">{{ r.role }}</div>
+      </div>
+      {% if r.llm is not none %}<span class="score band-{{ r.llm_band|lower }}" title="LLM score">{{ r.llm }}</span>
+      {% else %}<span class="score none" title="not LLM-scored yet">–</span>{% endif %}
+    </div>
+    <div class="meta">
+      {% if r.location %}<span>{{ r.location }}</span>{% endif %}
+      {% if r.posted %}<span>{{ r.posted }}</span>{% endif %}
+      {% if r.fit is not none %}<span>fit {{ r.fit }}</span>{% endif %}
+      <span>{{ r.source }}</span>
+      {% if r.flagged %}<span class="warn">flagged: check the posting</span>{% endif %}
+    </div>
+    <div class="actions">
+      {% set link = r.url|http_link %}
+      {% if link %}<a class="button" href="{{ link }}" target="_blank" rel="noopener noreferrer">Open posting</a>{% endif %}
+      <button hx-post="/jobs/{{ r.id }}/applied" hx-target="#job-{{ r.id }}" hx-swap="outerHTML">I applied</button>
+      <button class="quiet" hx-post="/jobs/{{ r.id }}/skip" hx-target="#job-{{ r.id }}" hx-swap="outerHTML">Skip</button>
+    </div>
+  </li>
+{% endfor %}
+</ul>
+{% if total > rows|length %}<a class="button more" href="?track={{ track }}&show={{ show + 50 }}">Show more</a>{% endif %}
+{% endblock %}

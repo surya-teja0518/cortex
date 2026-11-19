@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["cle1"],
+  "functions": {
+    "api/index.py": {
+      "includeFiles": "{src/**,config.yaml}",
+      "excludeFiles": "{tests/**,data/**,packets/**,resumes/**,docs/**,*.db}",
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
+}

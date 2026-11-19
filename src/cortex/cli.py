@@ -272,6 +272,20 @@ def _compute_fits(ses, uid, master_path: str = "master_resume.yaml") -> int:
     return compute_fits(ses, uid, SkillMatcher.from_export(skills["matcher"])) if skills else 0
 
 
+def cmd_web(a, uid):
+    """The FastAPI dashboard, bound to 127.0.0.1 only. Same Google sign-in as the hosted one: set
+    CORTEX_PUBLIC_URL=http://127.0.0.1:<port> and add <that>/auth/callback to the OAuth client."""
+    import uvicorn
+
+    from cortex.web.app import create_app
+    from cortex.web.settings import SettingsError, load_settings
+    try:
+        settings = load_settings()
+    except SettingsError as e:
+        raise SystemExit(str(e)) from None
+    uvicorn.run(create_app(settings), host="127.0.0.1", port=a.port, log_level="warning")
+
+
 def cmd_export_skills(a, uid):
     """Write skills_profile.json: skill terms + the skills-only scorer profile, for the cloud daily job.
     The master resume itself never leaves this machine."""
@@ -736,6 +750,9 @@ def _main(argv=None):
     c.add_argument("--yes", action="store_true", help="actually change them (default: preview only)")
     c.set_defaults(fn=cmd_close_stale)
     sub.add_parser("llm-check", help="ping every configured LLM provider").set_defaults(fn=cmd_llm_check)
+    w = sub.add_parser("web", help="run the dashboard on this computer (http://127.0.0.1:8000)")
+    w.add_argument("--port", type=int, default=8000)
+    w.set_defaults(fn=cmd_web)
     ex = sub.add_parser("export-skills", help="write skills_profile.json (skills only) for the cloud daily job")
     ex.add_argument("--master", default="master_resume.yaml")
     ex.add_argument("--out", default="skills_profile.json")

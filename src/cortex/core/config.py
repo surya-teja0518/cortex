@@ -23,9 +23,16 @@ def load_config(path: str | None = None) -> dict:
     p = Path(path or os.getenv("CORTEX_CONFIG", "config.yaml"))
     cfg = yaml.safe_load(p.read_text()) or {}
     local = p.with_name(LOCAL_NAME)
-    if not os.getenv("CORTEX_NO_LOCAL_CONFIG") and local.exists() and local.resolve() != p.resolve():
-        over = yaml.safe_load(local.read_text()) or {}
+    if os.getenv("CORTEX_NO_LOCAL_CONFIG"):
+        return cfg
+    text = None
+    if local.exists() and local.resolve() != p.resolve():
+        text, where = local.read_text(), str(local)
+    elif os.getenv("CORTEX_CONFIG_LOCAL_YAML"):        # hosted dashboard: no writable file, the env var holds it
+        text, where = os.environ["CORTEX_CONFIG_LOCAL_YAML"], "CORTEX_CONFIG_LOCAL_YAML"
+    if text is not None:
+        over = yaml.safe_load(text) or {}
         if not isinstance(over, dict):
-            raise ValueError(f"{local} must be a YAML mapping")
+            raise ValueError(f"{where} must be a YAML mapping")
         cfg = deep_merge(cfg, over)
     return cfg
