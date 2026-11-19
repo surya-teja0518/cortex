@@ -14,7 +14,8 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.orm import defer
 
 from cortex.core.audit import AuditLog
 from cortex.db.schema import ApplicationEventRow, JobRow
@@ -140,10 +141,20 @@ def history(session, user_id: str, job_id: int) -> list[ApplicationEventRow]:
         .order_by(ApplicationEventRow.id)))   # append order; `at` can be backdated
 
 
-def _last_activity(session, user_id: str, job: JobRow) -> date | None:
-    ev = session.scalar(select(ApplicationEventRow.at).where(
-        ApplicationEventRow.user_id == user_id, ApplicationEventRow.job_id == job.id)
-        .order_by(ApplicationEventRow.at.desc()))
+def _last_events(session, user_id: str) -> dict[int, datetime]:
+    """Latest event time per job, ONE query (was one query per job: 122 round trips to Neon per page)."""
+    return dict(session.execute(select(ApplicationEventRow.job_id, func.max(ApplicationEventRow.at))
+                                .where(ApplicationEventRow.user_id == user_id)
+                                .group_by(ApplicationEventRow.job_id)).all())
+
+
+def _last_activity(session, user_id: str, job: JobRow, last_events: dict | None = None) -> date | None:
+    if last_events is not None:
+        ev = last_events.get(job.id)
+    else:
+        ev = session.scalar(select(ApplicationEventRow.at).where(
+            ApplicationEventRow.user_id == user_id, ApplicationEventRow.job_id == job.id)
+            .order_by(ApplicationEventRow.at.desc()))
     if ev:
         return ev.date()
     # Imported sheet rows have no events. Most real "Applied" rows (96 of 111, 2026-11-08) have no Applied Date
@@ -156,9 +167,11 @@ def followups(session, user_id: str, today: date, days: int = 7, max_days: int |
     """Active applications quiet for `days`..`max_days`: the window where a nudge still makes sense.
     Older ones are stale: close them with close_stale / no_response instead. max_days=None: no upper bound."""
     out = []
-    for job in session.scalars(select(JobRow).where(JobRow.user_id == user_id, JobRow.status.in_(ACTIVE),
-                                                    JobRow.dup_of_id.is_(None))):
-        last = _last_activity(session, user_id, job)
+    last_events = _last_events(session, user_id)
+    for job in session.scalars(select(JobRow).options(defer(JobRow.description))
+                               .where(JobRow.user_id == user_id, JobRow.status.in_(ACTIVE),
+                                      JobRow.dup_of_id.is_(None))):
+        last = _last_activity(session, user_id, job, last_events)
         quiet = (today - last).days if last is not None else None
         if quiet is not None and quiet >= days and (max_days is None or quiet <= max_days):
             out.append({"job_id": job.id, "company": job.company, "role": job.title, "status": job.status,
@@ -176,7 +189,8 @@ class TrackerReport:
 
 
 def report(session, user_id: str, today: date, weeks: int = 6) -> TrackerReport:
-    jobs = list(session.scalars(select(JobRow).where(JobRow.user_id == user_id, JobRow.dup_of_id.is_(None))))
+    jobs = list(session.scalars(select(JobRow).options(defer(JobRow.description))
+                                .where(JobRow.user_id == user_id, JobRow.dup_of_id.is_(None))))
     by_status = Counter(j.status for j in jobs if j.status in FUNNEL)
     reached = [j for j in jobs if j.status in FUNNEL]
     voided = _voided(session, user_id)

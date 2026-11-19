@@ -3,6 +3,7 @@ import json
 from datetime import date, timedelta
 
 from sqlalchemy import func, select
+from sqlalchemy.orm import defer
 
 from cortex.agents.tracker import FUNNEL
 from cortex.core.audit import AuditLog
@@ -16,7 +17,8 @@ def review_queue(session, user_id: str, *, tracks=None, city: str = "", min_syna
     """max_age_days hides postings older than that (posted date, else date added). Most postings close within
     weeks and LinkedIn can't be checked automatically (no LinkedIn scraping), so age is the honest proxy.
     Hiding is view-only: nothing is marked closed. Jobs with neither date are kept."""
-    q = select(JobRow).where(JobRow.user_id == user_id, JobRow.status.in_(statuses))
+    q = (select(JobRow).options(defer(JobRow.description))       # JDs are up to ~20 KB each: never needed here
+         .where(JobRow.user_id == user_id, JobRow.status.in_(statuses)))
     if max_age_days is not None:
         cutoff = (today or date.today()) - timedelta(days=max_age_days)  # noqa: DTZ011 (local date)
         q = q.where(func.coalesce(JobRow.posted, JobRow.date_added).is_(None)
@@ -98,8 +100,8 @@ def ready_to_apply(session, user_id: str) -> list[dict]:
 
 def applications(session, user_id: str) -> list[dict]:
     """Everything in the funnel (applied and beyond), newest application first."""
-    q = (select(JobRow).where(JobRow.user_id == user_id, JobRow.dup_of_id.is_(None),
-                              JobRow.status.in_(FUNNEL))
+    q = (select(JobRow).options(defer(JobRow.description))
+         .where(JobRow.user_id == user_id, JobRow.dup_of_id.is_(None), JobRow.status.in_(FUNNEL))
          .order_by(JobRow.applied_date.desc().nulls_last()))
     return [dict(job_id=j.id, company=j.company, role=j.title, status=j.status, applied=j.applied_date, url=j.url)
             for j in session.scalars(q)]

@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Report</h1>
+<div class="stats">
+  <div class="stat"><div class="n">{{ r.applied_total }}</div><div class="muted">applications</div></div>
+  <div class="stat"><div class="n">{% if r.response_rate is not none %}{{ (r.response_rate * 100)|round|int }}%{% else %}–{% endif %}</div><div class="muted">response rate (interview or offer)</div></div>
+  <div class="stat"><div class="n">{{ fups|length }}</div><div class="muted">follow-ups due</div></div>
+</div>
+<h2>By status</h2>
+<ul class="list">{% for k, v in r.by_status|dictsort %}<li>{{ STATUS_LABEL.get(k, k) }} <span class="muted">{{ v }}</span></li>{% endfor %}</ul>
+<h2>Applications per week</h2>
+<ul class="list">{% for w, n in r.per_week %}<li>week of {{ w }} <span class="muted">{{ n }}</span></li>{% endfor %}</ul>
+{% endblock %}

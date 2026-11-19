@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block content %}
+{% if ready %}
+<h1>Ready to apply <span class="muted">{{ ready|length }}</span></h1>
+<ul class="cards">
+{% for r in ready %}
+  <li class="card" id="ready-{{ r.job_id }}">
+    <div class="company">{{ r.company }}</div><div class="role">{{ r.role }}</div>
+    <div class="meta">{% if r.packet %}<span>packet built</span>{% else %}<span class="warn">packet not built yet: cortex packet {{ r.job_id }}</span>{% endif %}</div>
+    <div class="actions">
+      {% set link = r.url|http_link %}
+      {% if link %}<a class="button" href="{{ link }}" target="_blank" rel="noopener noreferrer">Open posting</a>{% endif %}
+      <button hx-post="/jobs/{{ r.job_id }}/applied" hx-target="#ready-{{ r.job_id }}" hx-swap="outerHTML">I applied</button>
+    </div>
+  </li>
+{% endfor %}
+</ul>
+{% endif %}
+
+<h1>Follow-ups due <span class="muted">{{ fups|length }}</span></h1>
+{% if not fups %}<p class="empty">No follow-ups due.</p>{% endif %}
+<ul class="list">
+{% for f in fups[:30] %}
+  <li><span class="company">{{ f.company }}</span> | {{ f.role }} <span class="muted">{{ f.days_quiet }} days quiet, {{ STATUS_LABEL.get(f.status, f.status) }}</span></li>
+{% endfor %}
+</ul>
+
+<h1>Applications <span class="muted">{{ rows|length }}</span></h1>
+<ul class="cards">
+{% for r in rows %}
+  <li class="card" id="app-{{ r.job_id }}">
+    <div class="head">
+      <div><div class="company">{{ r.company }}</div><div class="role">{{ r.role }}</div></div>
+      <span class="status s-{{ r.status }}">{{ STATUS_LABEL.get(r.status, r.status) }}</span>
+    </div>
+    <div class="meta">{% if r.applied %}<span>applied {{ r.applied }}</span>{% endif %}</div>
+    <div class="actions">
+      {% if r.next %}
+      <form hx-post="/jobs/{{ r.job_id }}/status" hx-target="#app-{{ r.job_id }}" hx-swap="outerHTML" class="inline">
+        <select name="status" aria-label="New status">
+          {% for n in r.next %}<option value="{{ n }}">{{ STATUS_LABEL.get(n, n) }}</option>{% endfor %}
+        </select>
+        <button>Update</button>
+      </form>
+      {% endif %}
+      <button class="quiet" hx-post="/jobs/{{ r.job_id }}/undo" hx-target="#app-{{ r.job_id }}" hx-swap="outerHTML"
+              hx-confirm="Undo the last status change for {{ r.company }}?">Undo</button>
+    </div>
+  </li>
+{% endfor %}
+</ul>
+{% endblock %}

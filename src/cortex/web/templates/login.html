@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>CORTEX: sign in</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="login">
+  <main class="card narrow">
+    <h1>CORTEX</h1>
+    <p class="muted">Private job-search dashboard. Only its owner can sign in.</p>
+    {% if error %}<div class="notice error" role="alert">{{ error }}</div>{% endif %}
+    <a class="button primary" href="/auth/google">Sign in with Google</a>
+  </main>
+</body>
+</html>

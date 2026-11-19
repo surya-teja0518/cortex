@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Approvals <span class="muted">{{ items|length }}</span></h1>
+<p class="muted">Tailored resumes that passed Truth Guard. Approving records the decision; the PDF packet is built on your computer (<code>cortex packet &lt;id&gt;</code>). Nothing is ever submitted for you.</p>
+{% if not items %}<p class="empty">Nothing waiting for approval.</p>{% endif %}
+{% for p in items %}
+<article class="card" id="appr-{{ p.job_id }}">
+  <div class="company">{{ p.company }}</div>
+  <div class="role">{{ p.role }}</div>
+  <div class="meta"><span>Truth Guard passed after {{ p.attempts }} attempt(s)</span>
+    {% if p.resume and p.resume.based_on %}<span>{{ p.resume.based_on }}</span>{% endif %}</div>
+  {% if p.resume %}
+  <details>
+    <summary>Resume content</summary>
+    {% if p.resume.summary %}<p>{{ p.resume.summary }}</p>{% endif %}
+    {% if p.resume.skills %}<p><strong>Skills:</strong> {{ p.resume.skills|join(", ") }}</p>{% endif %}
+    {% for role in p.resume.roles or [] %}
+      <p><strong>{{ role.employer }}</strong>{% if role.title %} | {{ role.title }}{% endif %}</p>
+      <ul>{% for b in role.bullets or [] %}<li>{{ b }}</li>{% endfor %}</ul>
+    {% endfor %}
+  </details>
+  {% endif %}
+  {% set link = p.url|http_link %}
+  {% if link %}<a class="button" href="{{ link }}" target="_blank" rel="noopener noreferrer">Open posting</a>{% endif %}
+  <form hx-post="/approvals/{{ p.job_id }}" hx-target="#appr-{{ p.job_id }}" hx-swap="outerHTML" class="decide">
+    <input name="note" maxlength="500" placeholder="Note (optional)" aria-label="Note">
+    <button name="decision" value="approve" class="primary">Approve</button>
+    <button name="decision" value="reject" class="quiet">Reject</button>
+  </form>
+</article>
+{% endfor %}
+{% endblock %}
