@@ -20,3 +20,4 @@ gmail-oauth-client.json
 gmail-token.json
 skills_profile.json
 .vercel
+build/

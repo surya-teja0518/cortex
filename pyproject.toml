@@ -3,9 +3,14 @@ name = "cortex"
 version = "0.1.0"
 description = "Multi-agent job-search system with human-in-the-loop approval"
 requires-python = ">=3.11"
+# One dependency list for the CLI, the GitHub Actions job AND Vercel (Vercel installs from this file, not from a
+# requirements.txt: the first hosted deploy failed with "No module named 'fastapi'", 2026-11-20). Postgres is core
+# since the shared Neon database (Phase 1); the dashboard libraries are small.
 dependencies = ["pydantic>=2.7", "sqlalchemy>=2.0", "python-dotenv>=1.0", "pyyaml>=6.0",
                 "langgraph>=1.0", "langgraph-checkpoint-sqlite>=3.0", "httpx>=0.27",
-                "reportlab>=4.0"]
+                "reportlab>=4.0",
+                "psycopg[binary]>=3.2", "psycopg-pool>=3.2", "langgraph-checkpoint-postgres>=2.0",
+                "fastapi>=0.115", "jinja2>=3.1", "itsdangerous>=2.2", "python-multipart>=0.0.9"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "ruff>=0.6", "pypdf>=4.0"]
@@ -13,8 +18,8 @@ ui = ["streamlit>=1.40"]
 workday = ["playwright>=1.48"]
 sheets = ["google-auth>=2.30", "requests>=2.32"]
 gmail = ["google-auth>=2.30", "requests>=2.32", "google-auth-oauthlib>=1.2"]
-postgres = ["psycopg[binary]>=3.2", "langgraph-checkpoint-postgres>=2.0"]
-web = ["fastapi>=0.115", "jinja2>=3.1", "itsdangerous>=2.2", "python-multipart>=0.0.9", "uvicorn>=0.30"]
+postgres = []      # now core; kept so `pip install -e ".[postgres]"` (the Actions workflow) still works
+web = ["uvicorn>=0.30"]   # only for `cortex web` on your own computer
 
 [project.scripts]
 cortex = "cortex.cli:main"
