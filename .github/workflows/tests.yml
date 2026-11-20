@@ -1,0 +1,52 @@
+# Test suite on Linux (+ real Postgres) and Windows, for every push to main and every pull request.
+# No secrets are used or available here: tests never touch Neon, Gmail, Groq or Apify (conftest drops
+# CORTEX_DB_URL; every external call in the tests is mocked).
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    env:
+      PYTHONUTF8: "1"
+      CORTEX_NO_LOCAL_CONFIG: "1"
+    services:
+      postgres:
+        image: ${{ matrix.os == 'ubuntu-latest' && 'postgres:17-alpine' || '' }}
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: cortex_test
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -q -e ".[dev,web,sheets,gmail]"
+      - name: Tests (SQLite)
+        run: python -m pytest -q -p no:warnings
+      - name: Tests (Postgres)
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          CORTEX_TEST_PG_URL: postgresql://postgres:test@localhost:5432/cortex_test
+        run: python -m pytest -q -p no:warnings
