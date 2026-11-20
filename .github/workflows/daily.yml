@@ -9,8 +9,11 @@ name: cortex-daily
 
 on:
   schedule:
-    - cron: "30 5 * * *"        # 11:00 IST: after the Tue/Fri Apify scrapes (10:00 + 10:20 IST) finish, so new jobs
-                                # arrive the same day. GitHub may start scheduled runs some minutes late.
+    # 11:13, 14:13, 18:13, 22:13 IST. GitHub runs schedules best-effort: one came 8.5 h late, another never
+    # came (2026-11-19/20). The first slot that runs does the day's work; later ones see `--once-per-day` and
+    # exit in seconds. Odd minutes: the top/half of the hour is GitHub's busiest. 11:13 is after the Tue/Fri
+    # Apify scrapes (10:00 + 10:20 IST).
+    - cron: "43 5,8,12,16 * * *"
   workflow_dispatch: {}
 
 permissions:
@@ -56,7 +59,8 @@ jobs:
           printf '%s' "$SHEETS_KEY"   > google-service-account.json
           printf '%s' "$GMAIL_TOKEN"  > gmail-token.json
       - name: cortex daily
-        run: cortex daily
+        # scheduled slots skip once today is done; a run started by hand always runs in full
+        run: cortex daily ${{ github.event_name == 'schedule' && '--once-per-day' || '' }}
       - name: Remove secret files
         if: always()
         run: rm -f config.local.yaml skills_profile.json google-service-account.json gmail-token.json
