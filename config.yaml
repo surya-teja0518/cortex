@@ -124,6 +124,7 @@ daily:
   hour: 9            # local time on the Mac; launchd runs a missed time when the Mac wakes
   minute: 7
   score_limit: 100   # LLM calls per run (Groq free tier: ~500 scoring calls/day)
+  timezone: Asia/Kolkata   # the day `cortex daily --once-per-day` counts in (GitHub's runner is on UTC)
 
 # Email digest to your own GMAIL_ADDRESS (.env). Counts + company/title only; no links; never resume content.
 digest:

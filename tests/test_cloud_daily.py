@@ -120,3 +120,80 @@ def test_vercel_serves_no_repo_files_statically():
     assert cfg["outputDirectory"] == "public" and cfg["regions"] == ["cle1"]
     assert sorted(p.name for p in (root / "public").iterdir()) == ["robots.txt"]
     assert "Disallow: /" in (root / "public/robots.txt").read_text()
+
+
+# ---------- once-per-day guard for the extra schedule slots (2026-11-20) ----------
+
+def test_local_today_uses_ist_not_utc():
+    from datetime import UTC, date, datetime
+
+    from cortex.daily import local_today
+    assert local_today({}, datetime(2026, 11, 20, 20, 0, tzinfo=UTC)) == date(2026, 11, 21)   # 01:30 IST next day
+    assert local_today({"daily": {"timezone": "UTC"}}, datetime(2026, 11, 20, 20, 0, tzinfo=UTC)) == date(2026, 11, 20)
+
+
+def test_guard_skips_done_days_retries_once_then_stops(tmp_path):
+    from datetime import date
+
+    from cortex.daily import already_done, record_run
+    from cortex.db.schema import get_session
+    ses = get_session(f"sqlite:///{tmp_path}/g.db")
+    d = date(2026, 11, 20)
+    assert already_done(ses, "u1", d) is None
+    record_run(ses, "u1", d, ["apify"])
+    assert already_done(ses, "u1", d) is None                       # one failure: a later slot retries
+    record_run(ses, "u1", d, ["apify"])
+    assert "failed runs today" in already_done(ses, "u1", d)        # two: stop, no email storm
+    assert already_done(ses, "u2", d) is None and already_done(ses, "u1", date(2026, 11, 21)) is None
+    record_run(ses, "u1", date(2026, 11, 21), [])
+    assert "already finished" in already_done(ses, "u1", date(2026, 11, 21))
+
+
+def test_cli_once_per_day_skips_second_slot_but_manual_runs_always(tmp_path, monkeypatch, capsys):
+    import yaml
+    from sqlalchemy import select
+
+    from cortex.cli import main
+    from cortex.db.schema import DailyRunRow, get_session
+    monkeypatch.setenv("CORTEX_DB_URL", f"sqlite:///{tmp_path}/t.db")
+    monkeypatch.setenv("CORTEX_USER_ID", "u1")
+    monkeypatch.setenv("GMAIL_ADDRESS", "me@example.com")
+    monkeypatch.setenv("GMAIL_APP_PASSWORD", "x")
+    monkeypatch.chdir(tmp_path)
+    cfg = yaml.safe_load((Path(__file__).parent.parent / "config.yaml").read_text())
+    cfg["digest"] = {**cfg.get("digest", {}), "send_when_empty": False}
+    cfg["sources"] = {"ats": {"boards": []}}
+    (tmp_path / "config.yaml").write_text(yaml.safe_dump(cfg))
+    args = ["daily", "--no-score", "--no-pull", "--no-sync", "--no-inbox", "--no-fetch"]
+    main(args + ["--once-per-day"])                                 # first slot: runs (nothing new: no email)
+    assert "cortex daily" in capsys.readouterr().out
+    main(args + ["--once-per-day"])                                 # second slot: skipped
+    assert "skipped (today's run already finished)" in capsys.readouterr().out
+    main(args)                                                      # by hand: runs again
+    assert "skipped" not in capsys.readouterr().out
+    main(args + ["--dry-run", "--once-per-day"])                    # dry runs neither skip nor record
+    rows = get_session(f"sqlite:///{tmp_path}/t.db").scalars(select(DailyRunRow)).all()
+    assert len(rows) == 2 and all(r.ok for r in rows)
+
+
+def test_empty_or_broken_skills_file_falls_back_quietly(tmp_path, monkeypatch, capsys):
+    from cortex import cli
+    from cortex.core.config import load_config
+    monkeypatch.chdir(tmp_path)
+    f = tmp_path / "skills.json"
+    monkeypatch.setenv("CORTEX_SKILLS_FILE", str(f))
+    cfg = load_config(str(Path(__file__).parent.parent / "config.yaml"))
+    cfg["llm"]["scorer_profile"] = True
+    for text in ("", "not json", "[]"):
+        f.write_text(text)
+        assert cli._profile(cfg) is None                            # generic profile, no JSONDecodeError
+    assert "empty or not JSON" in capsys.readouterr().err
+
+
+def test_workflow_slots_use_the_guard_and_manual_runs_do_not():
+    text = (Path(__file__).parent.parent / ".github/workflows/daily.yml").read_text()
+    wf = yaml.safe_load(text)
+    crons = [c["cron"] for c in wf.get("on", wf.get(True))["schedule"]]
+    assert crons == ["43 5,8,12,16 * * *"]                          # 11:13 14:13 18:13 22:13 IST
+    assert "github.event_name == 'schedule' && '--once-per-day'" in text
+    assert wf["concurrency"]["cancel-in-progress"] is False          # overlapping slots queue, never run together

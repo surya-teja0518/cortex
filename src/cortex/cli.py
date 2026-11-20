@@ -236,7 +236,7 @@ def _profile(cfg: dict, master_path: str = "master_resume.yaml", use: bool | Non
     if Path(master_path).exists():
         return candidate_profile(load_master(master_path))
     skills = _skills_file()
-    if skills is not None:                # cloud run: the exported skills-only profile
+    if skills is not None and skills.get("profile"):    # cloud run: the exported skills-only profile
         return skills["profile"]
     print(f"note: {master_path} not found; scoring with the generic profile", file=sys.stderr)
     return None
@@ -247,7 +247,14 @@ def _skills_file() -> dict | None:
     import json
     from pathlib import Path
     p = Path(os.getenv("CORTEX_SKILLS_FILE", "skills_profile.json"))
-    return json.loads(p.read_text()) if p.exists() else None
+    if not p.exists():
+        return None
+    try:
+        d = json.loads(p.read_text())
+    except ValueError:                     # empty / broken file (e.g. an unset GitHub secret): not a crash
+        print(f"note: {p.name} is empty or not JSON; scoring without the skills profile", file=sys.stderr)
+        return None
+    return d if isinstance(d, dict) else None
 
 
 def _build_scorer(cfg: dict, audit, provider: str = "route", profile: str | None = None):
@@ -269,7 +276,7 @@ def _compute_fits(ses, uid, master_path: str = "master_resume.yaml") -> int:
     if Path(master_path).exists():
         return compute_fits(ses, uid, SkillMatcher(load_master(master_path)))
     skills = _skills_file()
-    return compute_fits(ses, uid, SkillMatcher.from_export(skills["matcher"])) if skills else 0
+    return compute_fits(ses, uid, SkillMatcher.from_export(skills["matcher"])) if skills and skills.get("matcher") else 0
 
 
 def cmd_web(a, uid):
@@ -385,6 +392,13 @@ def cmd_daily(a, uid):
                 return BatchResult(candidates=len(candidates(s, uid, limit, scorer)), dry_run=True)
             _compute_fits(s, uid)
             return score_new(s, uid, scorer, limit=limit)
+    from cortex.daily import already_done, local_today, record_run
+    day = local_today(cfg)
+    if a.once_per_day and not dry:
+        why = already_done(ses, uid, day)
+        if why:
+            print(f"cortex daily: skipped ({why})")
+            return
     print(f"[{datetime.now():%Y-%m-%d %H:%M}] cortex daily")  # noqa: DTZ005 (local time for the log)
     res = run_daily(ses, cfg, uid, datetime.now().date(), fetch=fetch, score=score, pull=pull, sync=sync_step,  # noqa: DTZ005
                     inbox=inbox_step,
@@ -393,6 +407,8 @@ def cmd_daily(a, uid):
     for n in (public_notes(res.notes) if _public_log() else res.notes):
         print(f"  {n}")
     print(f"  digest: {res.digest_status}")
+    if not dry:
+        record_run(ses, uid, day, res.failed_steps)
     if res.failed_steps:
         raise SystemExit(f"failed steps: {', '.join(res.failed_steps)}")
 
@@ -699,6 +715,8 @@ def _main(argv=None):
     dl = sub.add_parser("daily", help="pull -> fetch -> score -> digest (what the schedule runs)")
     dl.add_argument("--dry-run", action="store_true",
                     help="read and report only: nothing written (sheet, database), no LLM calls, digest printed not sent")
+    dl.add_argument("--once-per-day", action="store_true",
+                    help="skip if today's run already finished (the extra schedule slots use this)")
     dl.add_argument("--no-fetch", action="store_true")
     dl.add_argument("--no-pull", action="store_true")
     dl.add_argument("--no-sync", action="store_true")
