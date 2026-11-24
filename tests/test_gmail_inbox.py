@@ -17,7 +17,7 @@ from cortex.sources.gmail_inbox import (
 )
 
 TOKEN = "ya29.GMAIL-SECRET"
-CFG = {"gmail": {"enabled": True, "lookback_days": 3}}
+CFG = {"gmail": {"enabled": True, "lookback_days": 3, "reply_reminders": False}}   # reminders: test_reply_waits.py
 
 
 @pytest.fixture

@@ -57,13 +57,14 @@ class Digest:
     followups: list[tuple[int, str, str, int]] = field(default_factory=list)   # id, company, title, days quiet
     applied_total: int = 0
     response_rate: float | None = None
+    waiting: list[tuple[int, str, str, str, int]] = field(default_factory=list)  # id, who, subject, asks, days
     notes: list[str] = field(default_factory=list)   # pipeline status lines from `cortex daily`
     max_job_id: int = 0
 
     @property
     def empty(self) -> bool:
         failed = any("FAILED" in n or "failed:" in n for n in self.notes)   # a broken pipeline is news
-        return not (self.new_total or self.pending or self.ready or self.followups or failed)
+        return not (self.new_total or self.pending or self.ready or self.followups or self.waiting or failed)
 
 
 def last_watermark(session, user_id: str) -> int:
@@ -94,6 +95,9 @@ def build_digest(session, user_id: str, today: date, *, top_n: int = 15, followu
     d.ready = [(safe(p["company"], 40), safe(p["role"])) for p in ready_to_apply(session, user_id)]
     d.followups = [(f["job_id"], safe(f["company"], 40), safe(f["role"]), f["days_quiet"])
                    for f in followups(session, user_id, today, followup_days, stale_days)]
+    from cortex.sources.reply_waits import days_waiting, open_waits
+    d.waiting = [(w.id, safe(w.who, 40), safe(w.subject, 90), safe(w.asks, 80), days_waiting(w))
+                 for w in open_waits(session, user_id)]
     rep = report(session, user_id, today)
     d.applied_total, d.response_rate = rep.applied_total, rep.response_rate
     return d
@@ -101,11 +105,18 @@ def build_digest(session, user_id: str, today: date, *, top_n: int = 15, followu
 
 def subject(d: Digest) -> str:
     top = sum(v for k, v in d.new_by_band.items() if k in TOP_BANDS)
-    return f"CORTEX {d.day.isoformat()}: {d.new_total} new ({top} P0/P1), {len(d.followups)} follow-ups"
+    nag = f"⚠ {len(d.waiting)} waiting on your reply · " if d.waiting else ""
+    return f"{nag}CORTEX {d.day.isoformat()}: {d.new_total} new ({top} P0/P1), {len(d.followups)} follow-ups"
 
 
 def render(d: Digest) -> str:
     out = [f"CORTEX daily digest, {d.day.isoformat()}", ""]
+    if d.waiting:   # first, every day until answered: an unanswered recruiter costs more than any new job
+        out.append(f"⚠ WAITING ON YOU: {len(d.waiting)} (reply today; listed every day until you do)")
+        for i, who, subj, asks, days in d.waiting:
+            out.append(f"  {days}d  {who} | {subj}")
+            out.append(f"       asks for: {asks}   (done another way? cortex reply-done {i})")
+        out.append("")
     bands = "  ".join(f"{b}={d.new_by_band.get(b, 0)}" for b in ("P0", "P1", "P2", "P3"))
     out.append(f"NEW JOBS: {d.new_total}  ({bands})")
     if d.new_gated or d.new_flagged:

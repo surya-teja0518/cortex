@@ -116,6 +116,10 @@ gmail:
   enabled: false
   lookback_days: 3
   max_messages: 2000      # per run; Gmail ids are paged (500 a page)
+  reply_reminders: true   # emails asking you for CTC / availability / a test -> top of every digest until answered
+  reply_expire_days: 21   # stop nagging after this many days
+  reply_lookback_days: 14 # every run also re-checks this window for unanswered asks (Gmail-side keyword search)
+  reply_ignore_domains: []   # extra sender domains whose "are you interested?" mails are blasts
   client_file: gmail-oauth-client.json
   token_file: gmail-token.json
 

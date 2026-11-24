@@ -209,6 +209,28 @@ class InboxFindingRow(Base):
     found_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
+class ReplyWaitRow(Base):
+    """A recruiter / employer email that is waiting on Surya: asks him to reply (CTC, notice period,
+    availability...) or to act (online test, portal form). Listed at the top of every daily digest and on the
+    dashboard until he replies (seen in his Sent mail), marks it done, or it expires. Added 2026-11-24 after
+    he lost an opportunity by not answering an email. Never the body or the sender address: `who` is the
+    display name or the sender's domain. New table."""
+    __tablename__ = "reply_waits"
+    __table_args__ = (UniqueConstraint("user_id", "message_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    message_id: Mapped[str] = mapped_column(String(64))
+    thread_id: Mapped[str | None] = mapped_column(String(64))
+    who: Mapped[str] = mapped_column(String(80))
+    subject: Mapped[str | None] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(8))                    # reply | action
+    asks: Mapped[str | None] = mapped_column(String(160))           # e.g. "CTC, notice period, availability"
+    asked_at: Mapped[datetime] = mapped_column(DateTime)
+    found_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    closed_how: Mapped[str | None] = mapped_column(String(16))      # replied | done | expired
+
+
 class AuditRow(Base):
     """Hash-chained audit log in the shared database (Postgres: every device appends to one chain).
     Same record + hash as the file log, so a file log copied in verifies unchanged. Append-only by code:

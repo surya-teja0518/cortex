@@ -148,7 +148,7 @@ def cmd_inbox(a, uid):
     cfg = load_config(a.config)
     try:
         r = scan(_session(), cfg, uid, client_from_config(cfg), dry_run=a.dry_run, audit=AuditLog(),
-                 days=a.days)
+                 days=a.days, asks_days=a.asks_days)
     except GmailError as e:
         raise SystemExit(f"inbox check failed: {e}") from None
     print(f"emails checked: {r.scanned}" + (f" ({r.skipped} slow to download: retried next run)" if r.skipped else ""))
@@ -159,8 +159,33 @@ def cmd_inbox(a, uid):
               + ("" if a.dry_run else f"   (undo: cortex undo {jid})"))
     for verdict, companies, why in r.to_check:
         print(f"  check yourself: possible {verdict} from {companies} ({why})")
+    for who, subj, asks in r.waiting_new:
+        print(f"  {'would remind' if a.dry_run else 'reminder added'}: {who} | {subj}  (asks for: {asks})")
+    if r.waiting_open or r.replied:
+        print(f"waiting on your reply: {r.waiting_open} ({r.replied} closed: you replied). List: cortex waiting")
     if a.dry_run:
         print("dry run: nothing recorded")
+
+
+def cmd_waiting(a, uid):
+    """Emails waiting on your reply (from the inbox check), oldest first."""
+    from cortex.sources.reply_waits import days_waiting, open_waits
+    rows = open_waits(_session(), uid)
+    if not rows:
+        print("Nothing waiting on you.")
+    for w in rows:
+        print(f"#{w.id:<4} {days_waiting(w):>2}d  {w.who} | {w.subject}\n        asks for: {w.asks}"
+              f"  ({'reply by email' if w.kind == 'reply' else 'do it on their site'})")
+
+
+def cmd_reply_done(a, uid):
+    """Close a reminder you handled another way (phone call, portal, test done, not interested)."""
+    from cortex.sources.reply_waits import close
+    try:
+        w = close(_session(), uid, a.wait_id, "done")
+    except LookupError as e:
+        raise SystemExit(str(e)) from None
+    print(f"closed #{w.id}: {w.who} | {w.subject}")
 
 
 def cmd_stats(a, uid):
@@ -697,7 +722,14 @@ def _main(argv=None):
     ib = sub.add_parser("inbox", help="find rejection / interview emails for your applications and record them")
     ib.add_argument("--dry-run", action="store_true", help="show what it would record; record nothing")
     ib.add_argument("--days", type=int, help="look back N days (default gmail.lookback_days)")
+    ib.add_argument("--asks-days", type=int, help="also find emails from the last N days still waiting on your "
+                                                    "reply, including ones already read (catch-up)")
     ib.set_defaults(fn=cmd_inbox)
+    wt = sub.add_parser("waiting", help="emails waiting on your reply (recruiter asked for CTC, availability, a test...)")
+    wt.set_defaults(fn=cmd_waiting)
+    rd = sub.add_parser("reply-done", help="close a reply reminder you handled another way")
+    rd.add_argument("wait_id", type=int)
+    rd.set_defaults(fn=cmd_reply_done)
     pl = sub.add_parser("pull", help="read SYNAPSE's recent Apify datasets (APIFY_TOKEN in .env); never starts runs")
     pl.add_argument("--dry-run", action="store_true", help="show what would be added; save nothing")
     pl.set_defaults(fn=cmd_pull)

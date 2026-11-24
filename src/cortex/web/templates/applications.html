@@ -1,5 +1,20 @@
 {% extends "base.html" %}
 {% block content %}
+{% if waiting %}
+<h1 class="warn">Waiting on your reply <span class="muted">{{ waiting|length }}</span></h1>
+<ul class="cards">
+{% for w in waiting %}
+  <li class="card" id="wait-{{ w.id }}">
+    <div class="company">{{ w.who }}</div><div class="role">{{ w.subject }}</div>
+    <div class="meta"><span class="warn">{{ w.days }} days waiting</span> <span>asks for: {{ w.asks }}</span>
+      <span>{{ "reply by email" if w.kind == "reply" else "do it on their site" }}</span></div>
+    <div class="actions">
+      <button class="quiet" hx-post="/waiting/{{ w.id }}/done" hx-target="#wait-{{ w.id }}" hx-swap="outerHTML">Done</button>
+    </div>
+  </li>
+{% endfor %}
+</ul>
+{% endif %}
 {% if ready %}
 <h1>Ready to apply <span class="muted">{{ ready|length }}</span></h1>
 <ul class="cards">
