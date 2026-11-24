@@ -102,3 +102,36 @@ def public_notes(notes: list[str]) -> list[str]:
     if marked or check:
         out.insert(0, f"gmail: {marked} recorded, {check} to check yourself (details in your digest email)")
     return out
+
+
+MAX_ATTEMPTS = 2   # a day with a failing step is retried once by a later slot, then left alone (no email storm)
+
+
+def local_today(cfg: dict, now=None):
+    """The calendar day the schedule thinks in (config daily.timezone, default Asia/Kolkata): GitHub's runner
+    is on UTC, and 00:00-05:30 IST is still 'yesterday' there."""
+    from datetime import UTC, datetime
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo((cfg.get("daily") or {}).get("timezone", "Asia/Kolkata"))
+    return (now or datetime.now(UTC)).astimezone(tz).date()
+
+
+def already_done(session, user_id: str, day) -> str | None:
+    """Why today's scheduled run can be skipped, or None to run. Guard for the extra schedule slots
+    (GitHub delays or drops scheduled runs: one slot came 8.5 h late, another never came, 2026-11-19/20)."""
+    from sqlalchemy import select
+
+    from cortex.db.schema import DailyRunRow
+    runs = list(session.scalars(select(DailyRunRow).where(DailyRunRow.user_id == user_id, DailyRunRow.day == day)))
+    if any(r.ok for r in runs):
+        return "today's run already finished"
+    if len(runs) >= MAX_ATTEMPTS:
+        return f"{len(runs)} failed runs today already; waiting for tomorrow (or run `cortex daily` by hand)"
+    return None
+
+
+def record_run(session, user_id: str, day, failed_steps: list[str]) -> None:
+    from cortex.db.schema import DailyRunRow
+    session.add(DailyRunRow(user_id=user_id, day=day, ok=0 if failed_steps else 1,
+                            failed_steps=", ".join(failed_steps)[:200] or None))
+    session.commit()

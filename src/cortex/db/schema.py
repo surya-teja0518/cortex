@@ -142,6 +142,19 @@ class PacketRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
 
 
+class DailyRunRow(Base):
+    """One row per finished `cortex daily` (not dry runs). `day` is the local calendar day (config
+    daily.timezone): the --once-per-day guard reads it so extra schedule slots skip once the day is done.
+    New table: no migration."""
+    __tablename__ = "daily_runs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    day: Mapped[date] = mapped_column(Date, index=True)
+    finished_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    ok: Mapped[int] = mapped_column(Integer, default=1)                 # 1 = every step succeeded
+    failed_steps: Mapped[str | None] = mapped_column(String(200))
+
+
 class DigestRunRow(Base):
     """One row per digest actually sent. max_job_id is the watermark: the next digest's "new jobs" are the
     ones above it. Counts only, no job text. New table: no migration."""
