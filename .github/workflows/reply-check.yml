@@ -1,0 +1,53 @@
+# CORTEX reply check (2026-11-24): every 2 hours, read recent Gmail (read-only, local rules, no LLM) and email
+# Surya at once if something waits on HIS reply (recruiter outreach, availability / CTC questions, assessment
+# links). The same scan also records clear rejections / shortlists. This is the ONLY workflow that reads Gmail
+# (the daily job runs --no-inbox), so two runs never process the same email.
+#
+# The repo is PUBLIC: CORTEX_PUBLIC_LOG=1 = counts only, no subjects, companies or addresses in the log.
+name: cortex-reply-check
+
+on:
+  schedule:
+    - cron: "17 */2 * * *"      # every 2 h at :17 (GitHub may run it late; the external trigger can call it too)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cortex-gmail
+  cancel-in-progress: false
+
+jobs:
+  reply-check:
+    if: github.repository == 'surya-teja0518/cortex'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CORTEX_PUBLIC_LOG: "1"
+      CORTEX_DB_URL: ${{ secrets.CORTEX_DB_URL }}
+      CORTEX_USER_ID: ${{ secrets.CORTEX_USER_ID }}
+      GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -q -e ".[gmail]"
+      - name: Write secret files (this run only)
+        env:
+          CONFIG_LOCAL: ${{ secrets.CORTEX_CONFIG_LOCAL_YAML }}
+          GMAIL_TOKEN: ${{ secrets.GMAIL_TOKEN_JSON }}
+        run: |
+          umask 077
+          printf '%s' "$CONFIG_LOCAL" > config.local.yaml
+          printf '%s' "$GMAIL_TOKEN"  > gmail-token.json
+      - name: cortex reply-check
+        run: cortex reply-check
+      - name: Remove secret files
+        if: always()
+        run: rm -f config.local.yaml gmail-token.json

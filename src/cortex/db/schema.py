@@ -193,6 +193,25 @@ class SkillFitRow(Base):
     text_sha: Mapped[str] = mapped_column(String(64))
 
 
+class ReplyAlertRow(Base):
+    """An email that waits on Surya's reply (recruiter outreach, availability / CTC / notice-period questions,
+    assessment invites), found by the Gmail scan (2026-11-24: an opportunity was lost to an unanswered email).
+    Stored: subject (<=120) and the sender's DOMAIN only (never the address, never the body), the phrase that
+    matched, and when he was alerted / marked it done. New table: no migration."""
+    __tablename__ = "reply_alerts"
+    __table_args__ = (UniqueConstraint("user_id", "message_id"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True)
+    message_id: Mapped[str] = mapped_column(String(64))
+    found_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    sender_domain: Mapped[str] = mapped_column(String(100))
+    subject: Mapped[str] = mapped_column(String(120))
+    cue: Mapped[str] = mapped_column(String(60))
+    company: Mapped[str | None] = mapped_column(String(120))       # when it names a company he applied to
+    alerted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    done_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
 class InboxFindingRow(Base):
     """One row per Gmail message the inbox watcher has looked at, so it is never read or applied twice.
     Never the body or the sender address; subject truncated, kept for the CLI/dashboard only. New table."""

@@ -90,3 +90,7 @@ body.login main { padding: 16px; }
   .top nav { order: 3; flex-basis: 100%; justify-content: space-between; }
   .top nav a { padding: 6px 8px; font-size: 0.95rem; }
 }
+
+/* "Waiting for your reply" sits on top of the queue: missed replies cost opportunities (2026-11-24) */
+.replies .card.reply { border-left: 4px solid var(--warn); }
+.replies { margin-bottom: 8px; }

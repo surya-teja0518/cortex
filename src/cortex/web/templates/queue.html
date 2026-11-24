@@ -1,5 +1,23 @@
 {% extends "base.html" %}
 {% block content %}
+{% if replies %}
+<section class="replies" aria-labelledby="replies-h">
+  <h1 id="replies-h">Waiting for your reply <span class="muted">{{ replies|length }}</span></h1>
+  <p class="muted">Answer these in Gmail, then tap Done. CORTEX never replies for you.</p>
+  <ul class="cards">
+  {% for r in replies %}
+    <li class="card reply" id="reply-{{ r.id }}">
+      <div class="company">{{ r.who }}</div>
+      <div class="role">{{ r.subject }}</div>
+      <div class="meta"><span class="warn">{{ r.cue }}</span><span>found {{ r.found.strftime("%d %b %H:%M") }} UTC</span></div>
+      <div class="actions">
+        <button class="primary" hx-post="/replies/{{ r.id }}/done" hx-target="#reply-{{ r.id }}" hx-swap="outerHTML">Done, I replied</button>
+      </div>
+    </li>
+  {% endfor %}
+  </ul>
+</section>
+{% endif %}
 <section class="bar">
   <h1>Queue <span class="muted">{{ rows|length }} of {{ total }}</span></h1>
   <form method="get" class="filters">

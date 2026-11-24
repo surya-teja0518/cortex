@@ -68,7 +68,8 @@ jobs:
       - name: cortex daily
         # scheduled slots and the external trigger skip once today is done; a run started by hand from the
         # Actions page (once_per_day unticked) always runs in full
-        run: cortex daily ${{ (github.event_name == 'schedule' || inputs.once_per_day) && '--once-per-day' || '' }}
+        # --no-inbox: Gmail is read ONLY by reply-check.yml (every 2 h), so two runs never scan the same email
+        run: cortex daily --no-inbox ${{ (github.event_name == 'schedule' || inputs.once_per_day) && '--once-per-day' || '' }}
       - name: Remove secret files
         if: always()
         run: rm -f config.local.yaml skills_profile.json google-service-account.json gmail-token.json
