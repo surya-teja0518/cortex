@@ -188,11 +188,25 @@ def create_app(settings: Settings, *, session_factory: Callable | None = None, c
     def queue(request: Request, track: str = "", show: int = 50):
         cfg = load_config()
         tracks = [track] if track in ("data", "database", "ai") else None
+        from cortex.notify.reply_alert import open_replies
         with db() as ses:
             rows = review_queue(ses, s.user_id, tracks=tracks, limit=2000,
                                 max_age_days=(cfg.get("freshness") or {}).get("max_age_days", 30))
+            replies = [{"id": r.id, "who": r.company or r.sender_domain, "subject": r.subject, "cue": r.cue,
+                        "found": r.found_at} for r in open_replies(ses, s.user_id)]
         show = max(10, min(int(show), 500))
-        return page(request, "queue.html", rows=rows[:show], total=len(rows), track=track, show=show)
+        return page(request, "queue.html", rows=rows[:show], total=len(rows), track=track, show=show,
+                    replies=replies)
+
+    @app.post("/replies/{alert_id}/done", response_class=HTMLResponse)
+    def reply_done(alert_id: int):
+        from cortex.notify.reply_alert import mark_done
+        with db() as ses:
+            ok = mark_done(ses, s.user_id, alert_id)
+        if ok:
+            new_audit().log("web", "reply_done", user_id=s.user_id, alert_id=alert_id)
+            return HTMLResponse("")
+        return notice("Already done, or not yours.", ok=False)
 
     @app.post("/jobs/{job_id}/skip", response_class=HTMLResponse)
     def skip(job_id: int):

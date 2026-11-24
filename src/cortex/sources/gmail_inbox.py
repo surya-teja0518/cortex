@@ -27,7 +27,7 @@ from cortex.agents.tracker import ACTIVE, TrackerError, update_status
 from cortex.core.audit import AuditLog
 from cortex.core.parsing import normalize_company
 from cortex.core.sanitize import sanitize_jd
-from cortex.db.schema import InboxFindingRow, JobRow
+from cortex.db.schema import InboxFindingRow, JobRow, ReplyAlertRow
 from cortex.sources.ats import html_to_text
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
@@ -65,6 +65,54 @@ _REJ_W = [re.compile(p, re.IGNORECASE) for p in REJECT_WEAK]
 _INT_S = [re.compile(p, re.IGNORECASE) for p in INTERVIEW_STRONG]
 _SHORT_S = [re.compile(p, re.IGNORECASE) for p in SHORTLIST_STRONG]
 
+# Emails that wait on HIS reply or action, whether or not the job is in the tracker (2026-11-24: an opportunity
+# was lost to an unanswered email). (label, pattern): the label is what gets stored and shown, never the text.
+REPLY_CUES = [
+    ("asks for your resume", r"(share|send|forward) (me |us )?(your|an?) (updated |latest )?(resume|cv|profile)"),
+    ("asks if you're interested", r"are you (still )?(interested|open to|looking|available)"),
+    ("asks your availability", r"(confirm|share|let (me|us) know|send) (me |us )?(your )?(availability|available (time|slots?))"),
+    ("asks a convenient time", r"(convenient|suitable|good) time (for|to) (a |an )?(call|talk|chat|speak|connect|discuss)"),
+    ("wants to schedule a call", r"(schedule|set up|arrange|book) (a |an )?(quick )?(call|chat|discussion|conversation)"),
+    ("asks CTC / notice period", r"(current|expected) ctc|notice period"),
+    ("asks you to reply", r"(please|kindly) (reply|respond|revert|confirm|acknowledge|get back)"),
+    ("waits for your response", r"(look(ing)? forward to (hearing from you|your (response|reply)))|await(ing)? your (response|reply)"),
+    ("assessment / interview link", (r"(complete|take|attempt) (the |your |an? )?(online |coding |technical )?(assessment|test|challenge)|"
+                                     r"(interview|assessment|test) (link|invite|invitation)|hackerrank|codility|hackerearth|codesignal|mettl")),
+    ("interview scheduled", r"interview (is )?(scheduled|confirmed)|scheduled (an |your )?interview|interview (slot|time) (is )?(booked|confirmed)"),
+    ("asks for details / a form", (r"details required|(provide|share|fill (in|out)?|submit) (the |your )?(following|below|required|requested) (details|information)|"
+                                   r"fill (in |out )?(the|this) (form|application)")),
+    ("recruiter reaching out", r"(i am|i'm|we are) reaching out|came across your (profile|resume)"),
+]
+# Generic cues: on their own they don't prove a person is waiting for him (job-board relays send them by the
+# thousand). From a job-board relay domain they need a specific ask (resume, CTC, availability, test...).
+_WEAK = {"recruiter reaching out", "asks if you're interested", "waits for your response"}
+_JOB_BOARDS = ("naukri.com", "foundit.in", "instahyre.com", "monsterindia.com", "shine.com", "timesjobs.com",
+               "iimjobs.com", "hirist.com", "indeed.com", "glassdoor.com")
+_REPLY = [(label, re.compile(p, re.IGNORECASE)) for label, p in REPLY_CUES]
+# bulk mail that uses the same words but never needs HIS reply (job alerts, newsletters, digests)
+_BULK = re.compile(r"(jobalerts|jobs-listings|job-?alerts?@|alerts@|newsletter|digest|marketing|"
+                   r"notifications?@(linkedin|naukri|indeed|glassdoor)|@e\.|@email\.|@mail\.(linkedin|naukri))", re.IGNORECASE)
+_DOMAIN = re.compile(r"@([a-z0-9.-]+\.[a-z]{2,})>?\s*$", re.IGNORECASE)
+
+
+def sender_domain(sender: str) -> str:
+    """'Talent <hr@acme.com>' -> 'acme.com'. Only the domain is ever stored, never the address."""
+    m = _DOMAIN.search(sender or "")
+    return m.group(1).lower()[:100] if m else "unknown"
+
+
+def needs_reply(mail: "Mail") -> str | None:   # quoted: Mail is defined below (3.12 evaluates annotations)
+    """Label of the first reply cue, or None. Rejections, job alerts and bulk mail never need a reply."""
+    if mail.bulk or any(s in mail.sender.lower() for s in SKIP_SENDERS) or _BULK.search(mail.sender):
+        return None                       # List-Unsubscribe = bulk/marketing: no real recruiter mail had it (2026-11-24)
+    text = f"{mail.subject}\n{mail.text}"
+    if classify(text)[0] == "rejected":
+        return None
+    labels = [label for label, rx in _REPLY if rx.search(text)]
+    if sender_domain(mail.sender).endswith(_JOB_BOARDS):
+        labels = [lb for lb in labels if lb not in _WEAK]
+    return labels[0] if labels else None
+
 
 class GmailError(Exception):
     pass
@@ -76,6 +124,7 @@ class Mail:
     sender: str
     subject: str
     text: str
+    bulk: bool = False      # has a List-Unsubscribe header (newsletters, marketing, job-alert blasts)
 
 
 @dataclass
@@ -352,7 +401,8 @@ class GmailClient:
         if not _ID.match(mid):
             raise GmailError("invalid message id")
         m = self._get(f"{API}/messages/{mid}", format="full")
-        return Mail(mid, _header(m, "from"), sanitize_jd(_header(m, "subject"))[0][:300], _body_text(m.get("payload")))
+        return Mail(mid, _header(m, "from"), sanitize_jd(_header(m, "subject"))[0][:300], _body_text(m.get("payload")),
+                    bulk=bool(_header(m, "list-unsubscribe")))
 
 
 # ---------- the step ----------
@@ -364,6 +414,7 @@ class InboxResult:
     capped: bool = False     # hit gmail.max_messages: older mail in the window was not read
     applied: list[tuple[int, str, str, str]] = field(default_factory=list)    # job id, verdict, company, title
     to_check: list[tuple[str, str, str]] = field(default_factory=list)        # verdict, company(s), why
+    reply_needed: list[tuple[str, str, str]] = field(default_factory=list)    # sender domain, subject, cue
 
 
 def scan(session, cfg: dict, user_id: str, client: GmailClient, *, dry_run: bool = False,
@@ -410,6 +461,14 @@ def scan(session, cfg: dict, user_id: str, client: GmailClient, *, dry_run: bool
                 res.to_check.append((f.verdict, ", ".join(sorted({j.company for j in jobs})), f.why))
         if not dry_run:
             session.add(row)
+        cue = needs_reply(mail)
+        if cue:
+            named = matching_jobs(mail, active)          # a company he applied to, named in this email (if any)
+            company = ", ".join(sorted({j.company for jobs in named.values() for j in jobs})) or None
+            res.reply_needed.append((sender_domain(mail.sender), mail.subject[:120], cue))
+            if not dry_run:
+                session.add(ReplyAlertRow(user_id=user_id, message_id=mid, sender_domain=sender_domain(mail.sender),
+                                          subject=mail.subject[:120], cue=cue, company=company and company[:120]))
     if dry_run:
         session.rollback()
     else:
@@ -417,7 +476,8 @@ def scan(session, cfg: dict, user_id: str, client: GmailClient, *, dry_run: bool
     if audit:
         audit.log("gmail_inbox", "scan", user_id=user_id, scanned=res.scanned, skipped=res.skipped,
                   applied=len(res.applied),
-                  to_check=len(res.to_check), dry_run=dry_run, stopped=bool(stop), capped=res.capped)
+                  to_check=len(res.to_check), reply_needed=len(res.reply_needed), dry_run=dry_run,
+                  stopped=bool(stop), capped=res.capped)
     if stop is not None:
         raise stop
     return res

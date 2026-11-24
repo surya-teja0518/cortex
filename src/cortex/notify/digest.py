@@ -58,6 +58,7 @@ class Digest:
     applied_total: int = 0
     response_rate: float | None = None
     notes: list[str] = field(default_factory=list)   # pipeline status lines from `cortex daily`
+    replies: list[tuple[str, str]] = field(default_factory=list)   # (company or sender domain, subject) not done
     max_job_id: int = 0
 
     @property
@@ -96,16 +97,22 @@ def build_digest(session, user_id: str, today: date, *, top_n: int = 15, followu
                    for f in followups(session, user_id, today, followup_days, stale_days)]
     rep = report(session, user_id, today)
     d.applied_total, d.response_rate = rep.applied_total, rep.response_rate
+    from cortex.notify.reply_alert import open_replies
+    d.replies = [(safe(r.company or r.sender_domain, 40), safe(r.subject, 100)) for r in open_replies(session, user_id)]
     return d
 
 
 def subject(d: Digest) -> str:
     top = sum(v for k, v in d.new_by_band.items() if k in TOP_BANDS)
-    return f"CORTEX {d.day.isoformat()}: {d.new_total} new ({top} P0/P1), {len(d.followups)} follow-ups"
+    reply = f"{len(d.replies)} WAITING FOR YOUR REPLY, " if d.replies else ""
+    return f"CORTEX {d.day.isoformat()}: {reply}{d.new_total} new ({top} P0/P1), {len(d.followups)} follow-ups"
 
 
 def render(d: Digest) -> str:
     out = [f"CORTEX daily digest, {d.day.isoformat()}", ""]
+    if d.replies:                                  # first: these cost opportunities when they wait
+        out += [f"WAITING FOR YOUR REPLY: {len(d.replies)} (answer in Gmail, then mark Done in the dashboard)"]
+        out += [f"  {w} | {s}" for w, s in d.replies[:15]] + [""]
     bands = "  ".join(f"{b}={d.new_by_band.get(b, 0)}" for b in ("P0", "P1", "P2", "P3"))
     out.append(f"NEW JOBS: {d.new_total}  ({bands})")
     if d.new_gated or d.new_flagged:
@@ -139,14 +146,19 @@ class DigestError(RuntimeError):
 def send(d: Digest, *, address: str | None, password: str | None, smtp_factory=None) -> None:
     """Send the digest to `address` FROM `address`. Raises DigestError with a message that never
     contains the password."""
+    send_text(subject(d), render(d), address=address, password=password, smtp_factory=smtp_factory)
+
+
+def send_text(subject_line: str, body: str, *, address: str | None, password: str | None, smtp_factory=None) -> None:
+    """Plain-text email to `address` FROM `address` (the only recipient CORTEX ever has)."""
     if not address or not password:
         raise DigestError("GMAIL_ADDRESS / GMAIL_APP_PASSWORD missing in .env")
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", address):
         raise DigestError("GMAIL_ADDRESS doesn't look like an email address")
     msg = EmailMessage()
     msg["From"] = msg["To"] = address
-    msg["Subject"] = subject(d)
-    msg.set_content(render(d))
+    msg["Subject"] = subject_line
+    msg.set_content(body)
     factory = smtp_factory or (lambda: smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, context=ssl.create_default_context(),
                                                         timeout=30))
     try:

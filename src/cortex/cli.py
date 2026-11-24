@@ -142,6 +142,29 @@ def cmd_gmail_auth(a, uid):
     print("Gmail read-only access saved. Test it: cortex inbox --dry-run")
 
 
+def cmd_reply_check(a, uid):
+    """Gmail scan + an immediate alert email for anything waiting on your reply (runs every 2 h in the cloud)."""
+    from cortex.notify.digest import DigestError
+    from cortex.notify.reply_alert import open_replies, send_new_alerts
+    from cortex.sources.gmail_inbox import GmailError, client_from_config, scan
+    cfg, audit, ses = load_config(a.config), AuditLog(), _session()
+    try:
+        r = scan(ses, cfg, uid, client_from_config(cfg), dry_run=a.dry_run, audit=audit)
+    except GmailError as e:
+        raise SystemExit(f"reply check failed: {e}") from None
+    try:
+        n = send_new_alerts(ses, uid, address=get_secret("GMAIL_ADDRESS", required=False),
+                            password=get_secret("GMAIL_APP_PASSWORD", required=False), dry_run=a.dry_run)
+    except DigestError as e:
+        raise SystemExit(f"alert not sent: {e}") from None
+    waiting = len(open_replies(ses, uid))
+    print(f"emails checked: {r.scanned}, new needing a reply: {len(r.reply_needed)}, "
+          f"{'would alert' if a.dry_run else 'alerted'}: {n}, still waiting (not marked done): {waiting}")
+    if not _public_log():
+        for dom, subj, cue in r.reply_needed:
+            print(f"  {dom} | {subj}  ({cue})")
+
+
 def cmd_inbox(a, uid):
     """Look for rejection / interview emails for your applications; record the unambiguous ones."""
     from cortex.sources.gmail_inbox import GmailError, client_from_config, scan
@@ -403,6 +426,18 @@ def cmd_daily(a, uid):
     res = run_daily(ses, cfg, uid, datetime.now().date(), fetch=fetch, score=score, pull=pull, sync=sync_step,  # noqa: DTZ005
                     inbox=inbox_step,
                     digest=_digest_fn(cfg, uid, audit, a.dry_run), audit=audit)
+    if inbox_step is not None and not dry:     # anything the inbox step found waiting on a reply: alert now
+        from cortex.notify.digest import DigestError
+        from cortex.notify.reply_alert import send_new_alerts
+        try:
+            in_digest = str(res.digest_status).startswith("sent")
+            sent = send_new_alerts(ses, uid, address=get_secret("GMAIL_ADDRESS", required=False),
+                                   password=get_secret("GMAIL_APP_PASSWORD", required=False),
+                                   covered_by_digest=in_digest)
+            if sent:
+                res.notes.append(f"reply alert: {sent} {'listed in the digest' if in_digest else 'emailed'}")
+        except DigestError as e:
+            res.notes.append(f"reply alert FAILED: {str(e).split(':')[0]}")
     from cortex.daily import public_notes
     for n in (public_notes(res.notes) if _public_log() else res.notes):
         print(f"  {n}")
@@ -694,6 +729,9 @@ def _main(argv=None):
     sy.set_defaults(fn=cmd_sync)
     ga = sub.add_parser("gmail-auth", help="one-time sign-in: let CORTEX read (only) your Gmail")
     ga.set_defaults(fn=cmd_gmail_auth)
+    rc = sub.add_parser("reply-check", help="Gmail scan + an alert email for anything waiting on your reply")
+    rc.add_argument("--dry-run", action="store_true", help="show what would be alerted; record and send nothing")
+    rc.set_defaults(fn=cmd_reply_check)
     ib = sub.add_parser("inbox", help="find rejection / interview emails for your applications and record them")
     ib.add_argument("--dry-run", action="store_true", help="show what it would record; record nothing")
     ib.add_argument("--days", type=int, help="look back N days (default gmail.lookback_days)")
