@@ -62,7 +62,9 @@ def test_export_skills_command_writes_a_private_file(tmp_path, monkeypatch, caps
     cli.main(["export-skills", "--master", str(m), "--out", str(out)])
     d = json.loads(out.read_text())
     assert d["profile"] == candidate_profile(MASTER) and d["matcher"]["version"] == 1
-    assert oct(out.stat().st_mode & 0o777) == "0o600"
+    import os
+    if os.name == "posix":          # Windows ignores chmod: the user-folder ACL protects the file there
+        assert oct(out.stat().st_mode & 0o777) == "0o600"
 
 
 # ---------- public log: counts only ----------
