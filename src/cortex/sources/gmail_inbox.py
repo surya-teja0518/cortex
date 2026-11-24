@@ -73,9 +73,12 @@ class GmailError(Exception):
 @dataclass
 class Mail:
     id: str
-    sender: str
+    sender: str               # in memory only, never stored
     subject: str
     text: str
+    thread_id: str = ""
+    at: datetime | None = None   # when Gmail received it
+    from_me: bool = False        # SENT label: his own mail, incl. CORTEX's digest to himself
 
 
 @dataclass
@@ -264,6 +267,23 @@ def _body_text(part: dict) -> str:
     return sanitize_jd(text[:MAX_TEXT])[0]
 
 
+_ADDR = re.compile(r"[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}")
+
+
+def _address(from_header: str) -> str:
+    """The bare address in a From header, only if it is a plain address (it goes into a Gmail search)."""
+    m = re.search(r"<([^<>\s]+)>", from_header or "")
+    cand = (m.group(1) if m else (from_header or "")).strip()
+    return cand if _ADDR.fullmatch(cand) else ""
+
+
+def _received(m: dict) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(int(m.get("internalDate")) / 1000, UTC)
+    except (TypeError, ValueError):
+        return None
+
+
 RATE_LIMIT_REASONS = {"rateLimitExceeded", "userRateLimitExceeded", "concurrentLimitExceeded"}
 _REASON = re.compile(r"^[A-Za-z]{3,40}$")
 
@@ -352,7 +372,36 @@ class GmailClient:
         if not _ID.match(mid):
             raise GmailError("invalid message id")
         m = self._get(f"{API}/messages/{mid}", format="full")
-        return Mail(mid, _header(m, "from"), sanitize_jd(_header(m, "subject"))[0][:300], _body_text(m.get("payload")))
+        tid = str(m.get("threadId") or "")
+        return Mail(mid, _header(m, "from"), sanitize_jd(_header(m, "subject"))[0][:300], _body_text(m.get("payload")),
+                    thread_id=tid if _ID.match(tid) else "", at=_received(m),
+                    from_me="SENT" in (m.get("labelIds") or []))
+
+    def ask_ids(self, days: int, query: str, limit: int = 500) -> list[str]:
+        """Message ids in the window that Gmail's own search thinks might ask something of him (catch-up for
+        reply reminders over mail the inbox watcher already read). `query` is CORTEX's fixed keyword list."""
+        q = f"newer_than:{int(days)}d -in:sent -category:promotions -category:social -category:forums ({query})"
+        data = self._get(f"{API}/messages", q=q, maxResults=min(limit, 500))
+        return [m["id"] for m in (data.get("messages") or []) if isinstance(m, dict) and _ID.match(str(m.get("id", "")))]
+
+    def replied_after(self, thread_id: str, message_id: str, after: datetime) -> bool:
+        """Has Surya sent anything since `after`, either in that thread or to that sender? The sender's address
+        is fetched again here, used in one Gmail search and dropped: it is never stored."""
+        cutoff = int(after.replace(tzinfo=after.tzinfo or UTC).timestamp() * 1000)
+        if thread_id and _ID.match(thread_id):
+            t = self._get(f"{API}/threads/{thread_id}", format="minimal")
+            for m in t.get("messages") or []:
+                if "SENT" in (m.get("labelIds") or []) and int(m.get("internalDate") or 0) > cutoff:
+                    return True
+        if not _ID.match(message_id):
+            return False
+        m = self._get(f"{API}/messages/{message_id}", format="metadata", metadataHeaders="From")
+        addr = _address(_header(m, "from"))
+        if not addr:
+            return False
+        q = f"in:sent to:{addr} after:{int(cutoff / 1000)}"
+        data = self._get(f"{API}/messages", q=q, maxResults=1)
+        return bool(data.get("messages"))
 
 
 # ---------- the step ----------
@@ -364,11 +413,31 @@ class InboxResult:
     capped: bool = False     # hit gmail.max_messages: older mail in the window was not read
     applied: list[tuple[int, str, str, str]] = field(default_factory=list)    # job id, verdict, company, title
     to_check: list[tuple[str, str, str]] = field(default_factory=list)        # verdict, company(s), why
+    waiting_new: list[tuple[str, str, str]] = field(default_factory=list)     # who, subject, what it asks for
+    waiting_open: int = 0    # reminders still open after this run (new + older, minus the ones he answered)
+    replied: int = 0         # reminders closed this run because his Sent mail shows a reply
 
 
 def scan(session, cfg: dict, user_id: str, client: GmailClient, *, dry_run: bool = False,
-         audit: AuditLog | None = None, days: int | None = None) -> InboxResult:
+         audit: AuditLog | None = None, days: int | None = None, asks_days: int | None = None) -> InboxResult:
+    """asks_days: also look back N days for emails waiting on his reply, including mail already read
+    (catch-up when reply reminders are first switched on)."""
+    from cortex.sources import reply_waits as RW
     gc = cfg.get("gmail") or {}
+    reminders = gc.get("reply_reminders", True)
+    ignore = RW.IGNORE_DOMAINS + tuple(gc.get("reply_ignore_domains") or ())
+
+    looked: set[str] = set()
+
+    def remember(mail):
+        if mail.id in looked:
+            return
+        looked.add(mail.id)
+        ask = (RW.needs_reply(mail.sender, mail.subject, mail.text, ignore)
+               if reminders and not mail.from_me else None)
+        if ask and (dry_run or RW.add(session, user_id, mail, ask) is not None):
+            res.waiting_new.append((ask.who, mail.subject[:80], ", ".join(ask.asks)))
+
     seen = set(session.scalars(select(InboxFindingRow.message_id).where(InboxFindingRow.user_id == user_id)))
     active = list(session.scalars(select(JobRow).where(JobRow.user_id == user_id, JobRow.status.in_(ACTIVE),
                                                        JobRow.dup_of_id.is_(None))))
@@ -389,6 +458,7 @@ def scan(session, cfg: dict, user_id: str, client: GmailClient, *, dry_run: bool
             res.skipped += 1
             continue
         res.scanned += 1
+        remember(mail)
         f = decide(mail, active)
         row = InboxFindingRow(user_id=user_id, message_id=mid, found_at=datetime.now(UTC))
         if f is not None:
@@ -410,14 +480,36 @@ def scan(session, cfg: dict, user_id: str, client: GmailClient, *, dry_run: bool
                 res.to_check.append((f.verdict, ", ".join(sorted({j.company for j in jobs})), f.why))
         if not dry_run:
             session.add(row)
+    asks_days = asks_days if asks_days is not None else int(gc.get("reply_lookback_days", 14))
+    if reminders and stop is None and asks_days:
+        known = set(session.scalars(select(RW.ReplyWaitRow.message_id).where(RW.ReplyWaitRow.user_id == user_id)))
+        for mid in client.ask_ids(int(asks_days), RW.GMAIL_ASK_QUERY):
+            if mid in known:
+                continue
+            try:
+                remember(client.message(mid))
+            except GmailError as e:
+                if "access denied" in str(e) or "rate limit" in str(e):
+                    stop = e
+                    break
+                res.skipped += 1
     if dry_run:
         session.rollback()
     else:
         session.commit()
+    if reminders and stop is None:
+        try:
+            rr = RW.refresh(session, user_id, client, expire_days=int(gc.get("reply_expire_days", 21)),
+                            dry_run=dry_run)
+            res.replied = rr.replied
+        except GmailError as e:
+            stop = e
+        res.waiting_open = len(RW.open_waits(session, user_id))
     if audit:
         audit.log("gmail_inbox", "scan", user_id=user_id, scanned=res.scanned, skipped=res.skipped,
                   applied=len(res.applied),
-                  to_check=len(res.to_check), dry_run=dry_run, stopped=bool(stop), capped=res.capped)
+                  to_check=len(res.to_check), dry_run=dry_run, stopped=bool(stop), capped=res.capped,
+                  waiting_new=len(res.waiting_new), waiting_open=res.waiting_open, replied=res.replied)
     if stop is not None:
         raise stop
     return res

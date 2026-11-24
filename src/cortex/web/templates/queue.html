@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+{% if waiting %}<p class="notice error" role="status">⚠ {{ waiting }} email{{ "s" if waiting != 1 }} waiting on your reply. <a href="/applications">See them</a></p>{% endif %}
 <section class="bar">
   <h1>Queue <span class="muted">{{ rows|length }} of {{ total }}</span></h1>
   <form method="get" class="filters">

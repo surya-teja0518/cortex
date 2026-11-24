@@ -49,6 +49,7 @@ def create_app(settings: Settings, *, session_factory: Callable | None = None, c
         record_skip,
         review_queue,
     )
+    from cortex.sources import reply_waits
 
     s = settings
     new_session = session_factory or (lambda: get_session(s.db_url))
@@ -191,8 +192,10 @@ def create_app(settings: Settings, *, session_factory: Callable | None = None, c
         with db() as ses:
             rows = review_queue(ses, s.user_id, tracks=tracks, limit=2000,
                                 max_age_days=(cfg.get("freshness") or {}).get("max_age_days", 30))
+            waiting = len(reply_waits.open_waits(ses, s.user_id))
         show = max(10, min(int(show), 500))
-        return page(request, "queue.html", rows=rows[:show], total=len(rows), track=track, show=show)
+        return page(request, "queue.html", rows=rows[:show], total=len(rows), track=track, show=show,
+                    waiting=waiting)
 
     @app.post("/jobs/{job_id}/skip", response_class=HTMLResponse)
     def skip(job_id: int):
@@ -243,9 +246,21 @@ def create_app(settings: Settings, *, session_factory: Callable | None = None, c
             fups = tracker.followups(ses, s.user_id, date.today(), cfg.get("followup_days", 7),
                                      cfg.get("stale_days", 30))
             rows = applications(ses, s.user_id)
+            waiting = [{"id": w.id, "who": w.who, "subject": w.subject or "", "asks": w.asks or "",
+                        "kind": w.kind, "days": reply_waits.days_waiting(w)}
+                       for w in reply_waits.open_waits(ses, s.user_id)]
         for r in rows:
             r["next"] = sorted(tracker.TRANSITIONS.get(r["status"], set()) - {r["status"]})
-        return page(request, "applications.html", ready=ready, fups=fups, rows=rows)
+        return page(request, "applications.html", ready=ready, fups=fups, rows=rows, waiting=waiting)
+
+    @app.post("/waiting/{wait_id}/done", response_class=HTMLResponse)
+    def waiting_done(wait_id: int):
+        with db() as ses:
+            try:
+                w = reply_waits.close(ses, s.user_id, wait_id, "done")
+            except LookupError:
+                return notice("No such reminder.", ok=False)
+            return notice(f"Done: {w.who} won't be listed any more.")
 
     @app.post("/jobs/{job_id}/status", response_class=HTMLResponse)
     def set_status(job_id: int, status: str = Form(...), note: str = Form("")):

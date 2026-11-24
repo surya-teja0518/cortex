@@ -280,3 +280,25 @@ def test_form_field_csrf_works_and_body_still_reaches_the_route(env):
     assert "is now interview" in r.text                                       # form read twice: still intact
     ev = get_session(env["url"]).scalars(select(ApplicationEventRow).where(ApplicationEventRow.job_id == b)).all()
     assert ev[-1].note == "call on Monday"
+
+
+def test_reply_reminders_on_dashboard_escaped_and_closable(env):
+    from datetime import datetime
+
+    from cortex.db.schema import ReplyWaitRow
+    ses = get_session(env["url"])
+    mine = ReplyWaitRow(user_id="u1", message_id="m0000001", who="Recruiter <b>X</b>", subject="Share CTC",
+                        kind="reply", asks="CTC, notice period", asked_at=datetime(2026, 11, 20))
+    theirs = ReplyWaitRow(user_id="other", message_id="m0000002", who="NotYoursEither", subject="s", kind="reply",
+                          asked_at=datetime(2026, 11, 20))
+    ses.add_all([mine, theirs])
+    ses.commit()
+    c = client(env)
+    assert "1 email waiting on your reply" in c.get("/").text
+    html = c.get("/applications").text
+    assert "Waiting on your reply" in html and "&lt;b&gt;X&lt;/b&gt;" in html and "NotYoursEither" not in html
+    h = csrf(c, env)
+    assert c.post(f"/waiting/{mine.id}/done").status_code == 403                       # CSRF still required
+    assert "No such reminder" in c.post(f"/waiting/{theirs.id}/done", headers=h).text  # other user's: refused
+    assert "won&#39;t be listed" in c.post(f"/waiting/{mine.id}/done", headers=h).text
+    assert "waiting on your reply" not in c.get("/").text

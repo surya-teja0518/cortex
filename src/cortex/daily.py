@@ -31,6 +31,9 @@ def run_daily(session, cfg: dict, user_id: str, today: date, *, fetch: Callable 
                 res.notes.append(f"gmail: marked {verdict}: {company} | {title} (undo: cortex undo {jid})")
             for verdict, companies, why in r.to_check:
                 res.notes.append(f"gmail: check yourself: possible {verdict} from {companies} ({why})")
+            if getattr(r, "waiting_open", 0) or getattr(r, "replied", 0):
+                res.notes.append(f"gmail: {r.waiting_open} emails waiting on your reply ({len(r.waiting_new)} new"
+                                 f", {r.replied} answered since last run)")
             if not r.applied and not r.to_check:
                 res.notes.append(f"gmail: {r.scanned} new emails, nothing about your applications"
                                  + (f" ({r.skipped} skipped, retried tomorrow)" if getattr(r, "skipped", 0) else ""))
