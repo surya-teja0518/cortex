@@ -245,7 +245,8 @@ def test_daily_notes_from_results(ses):
 # ---------- schedule ----------
 
 def test_plist_has_paths_only(tmp_path):
-    raw = render_plist(Path("/Users/s/cortex"), Path("/Users/s/cortex/.venv/bin/cortex"), 9, 7)
+    from pathlib import PurePosixPath   # launchd is macOS-only: Mac-style paths even when tests run on Windows
+    raw = render_plist(PurePosixPath("/Users/s/cortex"), PurePosixPath("/Users/s/cortex/.venv/bin/cortex"), 9, 7)
     p = plistlib.loads(raw)
     assert p["Label"] == LABEL and p["ProgramArguments"] == ["/Users/s/cortex/.venv/bin/cortex", "daily"]
     assert p["StartCalendarInterval"] == {"Hour": 9, "Minute": 7} and p["WorkingDirectory"] == "/Users/s/cortex"
