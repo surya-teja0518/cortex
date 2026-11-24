@@ -197,5 +197,7 @@ def test_workflow_slots_use_the_guard_and_manual_runs_do_not():
     wf = yaml.safe_load(text)
     crons = [c["cron"] for c in wf.get("on", wf.get(True))["schedule"]]
     assert crons == ["43 5,8,12,16 * * *"]                          # 11:13 14:13 18:13 22:13 IST
-    assert "github.event_name == 'schedule' && '--once-per-day'" in text
+    assert "(github.event_name == 'schedule' || inputs.once_per_day) && '--once-per-day'" in text
+    inputs = wf.get("on", wf.get(True))["workflow_dispatch"]["inputs"]
+    assert inputs["once_per_day"]["type"] == "boolean" and inputs["once_per_day"]["default"] is False
     assert wf["concurrency"]["cancel-in-progress"] is False          # overlapping slots queue, never run together
