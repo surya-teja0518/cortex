@@ -4,17 +4,24 @@
 # The repo is PUBLIC, so anyone can read these logs:
 # - CORTEX_PUBLIC_LOG=1: cortex prints counts only (no companies, titles, email subjects, URLs, tracebacks).
 # - No artifacts, no caches of data. Secrets are written to files only for this run (ephemeral runner, mode 600).
-# - Triggers: schedule + manual only. Forks / pull requests never run this and never see the secrets.
+# - Triggers: schedule + workflow_dispatch only. Forks / pull requests never run this and never see the secrets.
+# - The PRIMARY trigger is external: cron-job.org calls the workflow_dispatch API at 11:00 IST with
+#   once_per_day=true (GitHub's own schedule ran 8-11 h late every day, 2026-11-20..23). Its token is a
+#   fine-grained PAT limited to this repo with Actions read/write only: it can start runs, nothing else.
 name: cortex-daily
 
 on:
   schedule:
-    # 11:13, 14:13, 18:13, 22:13 IST. GitHub runs schedules best-effort: one came 8.5 h late, another never
-    # came (2026-11-19/20). The first slot that runs does the day's work; later ones see `--once-per-day` and
-    # exit in seconds. Odd minutes: the top/half of the hour is GitHub's busiest. 11:13 is after the Tue/Fri
-    # Apify scrapes (10:00 + 10:20 IST).
+    # FALLBACK slots, 11:13 / 14:13 / 18:13 / 22:13 IST, in case the external 11:00 trigger fails. GitHub runs
+    # schedules best-effort (8-11 h late, 2026-11-20..23); with `--once-per-day` the first run that gets
+    # through does the day's work and the rest exit in seconds.
     - cron: "43 5,8,12,16 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      once_per_day:
+        description: "Skip if today's run already finished (the external 11:00 trigger sets this)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -59,8 +66,9 @@ jobs:
           printf '%s' "$SHEETS_KEY"   > google-service-account.json
           printf '%s' "$GMAIL_TOKEN"  > gmail-token.json
       - name: cortex daily
-        # scheduled slots skip once today is done; a run started by hand always runs in full
-        run: cortex daily ${{ github.event_name == 'schedule' && '--once-per-day' || '' }}
+        # scheduled slots and the external trigger skip once today is done; a run started by hand from the
+        # Actions page (once_per_day unticked) always runs in full
+        run: cortex daily ${{ (github.event_name == 'schedule' || inputs.once_per_day) && '--once-per-day' || '' }}
       - name: Remove secret files
         if: always()
         run: rm -f config.local.yaml skills_profile.json google-service-account.json gmail-token.json
